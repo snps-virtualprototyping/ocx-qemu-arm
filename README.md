@@ -68,3 +68,44 @@ framework for ARMv7 and ARMv8 disassembly.
             cd ../../..
         done
 
+## Configuration Information
+
+The following assignments are used in the QEMU ARM core:
+
+### ``ocx::core::interrupt``
+
+The core expects the following IRQ inputs to be indicated via
+calls to ``interrupt`` with the associated ``irq`` value.
+All IRQs are active high. Calling ``interrupt`` with ``irq`` 
+value 4 or higher will wakeup a core blocked in a ``WFE`` or
+``WFI`` instruction without delivering a specific IRQ.
+
+| Name             | ``irq``     |
+|------------------|:-----------:|
+| IRQ              | 0           |
+| FIQ              | 1           |
+| VIRQ             | 2           |
+| VFIQ             | 3           |
+| wakeup events    | 4+          |
+
+### ``ocx::env::signal``
+
+The core indicates occurrences of counter interrupts via
+calls to ``signal`` with the associated ``sigid`` value:
+
+| Name            | ``sigid``    |
+|-----------------|:------------:|
+| CNTPNSIRQ       | 0            |
+| CNTVIRQ         | 1            |
+| CNTHPIRQ        | 2            |
+| CNTPSIRQ        | 3            |
+
+### ``ocx::env::get_param``
+
+The core will attempt to read the following parameter values
+from the environment:
+
+| Name           | Type         | Description                          |
+|----------------|--------------|--------------------------------------|
+| gicv3          | bool         | Enable GICv3 support                 |
+
