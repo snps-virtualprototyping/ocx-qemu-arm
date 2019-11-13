@@ -1,15 +1,11 @@
 /******************************************************************************
- * Copyright (C) 2019 Synopsys, Inc.
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
+ * Copyright Synopsys, licensed under the MIT license, see LICENSE for detail
  ******************************************************************************/
 
 #ifndef MODELDB_H
 #define MODELDB_H
 
-#include <string.h>
-
-namespace unicorn {
+namespace ocx { namespace arm {
 
     struct reg {
         const int    id;
@@ -32,6 +28,7 @@ namespace unicorn {
     };
 
     const model* lookup_model(const char* name);
-}
+
+}}
 
 #endif

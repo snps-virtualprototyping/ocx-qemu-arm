@@ -6,15 +6,11 @@
 
 #include "modeldb.h"
 
+#include <string.h>
 #include <unicorn/arm.h>
 #include <unicorn/arm64.h>
 
-#include <set>
-#include <cassert>
-
-#include "common.h"
-
-namespace unicorn {
+namespace ocx { namespace arm {
 
     static const reg g_regdb[] = {
         /* aarch64 core registers */
@@ -485,30 +481,4 @@ namespace unicorn {
         return nullptr;
     }
 
-    namespace {
-        class reg_db_consistency_checker {
-        public:
-
-            struct cmp {
-                bool operator()(const char *a, const char *b) const {
-                    return strcmp(a,b) < 0;
-                }
-             };
-
-            reg_db_consistency_checker() {
-                std::set<const char *, cmp> known_reg_handles;
-                bool found_error = false;
-                for (const reg *r = g_regdb; r->name; ++r) {
-                    if (!known_reg_handles.insert(r->name).second) {
-                        INFO("duplicate register handle %s", r->name);
-                        found_error = true;
-                    }
-                }
-
-                ERROR_ON(found_error, "duplicate register handles found");
-            }
-        };
-
-        static reg_db_consistency_checker g_check;
-    }
-};
+}};
