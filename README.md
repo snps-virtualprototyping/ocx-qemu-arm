@@ -38,13 +38,13 @@ framework for ARMv7 and ARMv8 disassembly.
 * The module should pass the regression tests are specified by the ocx test
   harness:
 
-	make test
+        make test
 
-	Test project ocx-qemu-arm/BUILD
-	    Start 1: ocx-qemu-arm
-	1/1 Test #1: ocx-qemu-arm .....................   Passed    0.02 sec
+        Test project ocx-qemu-arm/BUILD
+            Start 1: ocx-qemu-arm
+        1/1 Test #1: ocx-qemu-arm .....................   Passed    0.02 sec
 
-	100% tests passed, 0 tests failed out of 1
+        100% tests passed, 0 tests failed out of 1
 
 
 * Script for maintaining multiple builds for debug/release:
