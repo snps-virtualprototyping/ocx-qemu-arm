@@ -65,6 +65,27 @@ framework for ARMv7 and ARMv8 disassembly.
             cd ../../..
         done
 
+## Supported core variants
+
+The following core variants are supported, check also the [modeldb file](src/modeldb.cpp):
+
+| Core Variant|Architecture|
+|-------------|------------|
+| Cortex-M0   | ARMv7-M    |
+| Cortex-M3   | ARMv7-M    |
+| Cortex-M4   | ARMv7-M    |
+| Cortex-M33  | ARMv7-M    |
+| Cortex-R5   | ARMv7-R    |
+| Cortex-R5F  | ARMv7-R    |
+| Cortex-A7   | ARMv7-A    |
+| Cortex-A8   | ARMv7-A    |
+| Cortex-A9   | ARMv7-A    |
+| Cortex-A15  | ARMv7-A    |
+| Cortex-A53  | ARMv8-A    |
+| Cortex-A57  | ARMv8-A    |
+| Cortex-A72  | ARMv8-A    |
+| Cortex-Max  | ARMv8-A    |
+
 ## Configuration Information
 
 The following assignments are used in the QEMU ARM core:
