@@ -499,13 +499,13 @@ namespace ocx { namespace arm {
     }
 
     bool core::add_watchpoint(u64 addr, u64 size, bool iswr) {
-        int rw = UC_WP_BEFORE | (iswr ? UC_WP_WRITE : UC_WP_READ);
+        int rw = iswr ? UC_WP_WRITE : UC_WP_READ;
         uc_err ret = uc_cbwatchpoint_insert(m_uc, addr, size, rw);
         return ret == UC_ERR_OK;
     }
 
     bool core::remove_watchpoint(u64 addr, u64 size, bool iswr) {
-        int rw = UC_WP_BEFORE | (iswr ? UC_WP_WRITE : UC_WP_READ);
+        int rw = iswr ? UC_WP_WRITE : UC_WP_READ;
         uc_err ret = uc_cbwatchpoint_remove(m_uc, addr, size, rw);
         return ret == UC_ERR_OK;
     }
@@ -554,9 +554,12 @@ namespace ocx { namespace arm {
         ERROR_ON(bufsz == 0, "unexpected zero bufsz");
 
         u32 insn = 0;
-        u64 size = is_thumb() ? 2 : 4;
+        u64 size = read_mem(addr, &insn, 4);
 
-        if (read_mem(addr, &insn, size) != size)
+        if (!is_thumb() && size != 4)
+            return 0;
+
+        if (is_thumb() && size != 2 && size != 4)
             return 0;
 
         cs_insn* sym;
