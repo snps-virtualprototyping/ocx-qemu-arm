@@ -1,5 +1,7 @@
 # OpenCpuX/qemu-arm - Open Source Instruction-Set Simulation Integration Kit
 
+## Build Status: [![Build Status](https://travis-ci.org/snps-virtualprototyping/ocx-qemu-arm.svg?branch=master)](https://travis-ci.org/snps-virtualprototyping/ocx-qemu-arm)
+
 ## Overview
 
 This is an adaptation of the [QEMU](https://www.qemu.org/) ARMv7 and ARMv8 
