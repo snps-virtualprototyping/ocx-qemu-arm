@@ -212,7 +212,8 @@ namespace ocx { namespace arm {
         csh lookup_disassembler() const;
         u64 get_program_counter() const;
 
-        size_t read_mem(u64 addr, void *buf, size_t bufsz);
+        size_t read_mem(u64 addr, void* buf, size_t bufsz);
+        size_t write_mem(u64 addr, const void* buf, size_t bufsz);
         string semihosting_read_string(u64 addr, size_t n);
 
         u64 semihosting_get_reg(unsigned int no);
@@ -665,6 +666,41 @@ namespace ocx { namespace arm {
         return bytes_read;
     }
 
+    size_t core::write_mem(u64 addr, const void* buf, size_t bufsz) {
+        uc_err ret;
+        u64 phys = 0;
+        const size_t pgsz = page_size();
+        u8* bbuf = (u8*)buf;
+
+        size_t bytes_written = 0;
+        size_t bytes_remaining = bufsz;
+        while (bytes_remaining > 0) {
+            ret = uc_va2pa(m_uc, addr, &phys);
+            if (ret != UC_ERR_OK)
+                return bytes_written;
+
+            size_t page_remaining = pgsz - (phys & (pgsz - 1));
+            size_t size = std::min(bytes_remaining, page_remaining);
+
+            try {
+                 ret = uc_mem_write(m_uc, phys, bbuf, size);
+                 if (ret != UC_ERR_OK)
+                     return bytes_written;
+             } catch (...) {
+                 fprintf(stderr, "error reading memory at %016lx\n", phys);
+                 return bytes_written;
+             }
+
+             addr += size;
+             bbuf += size;
+             bytes_written += size;
+             bytes_remaining-= size;
+         }
+
+         return bytes_written;
+    }
+
+
     string core::semihosting_read_string(u64 addr, size_t n) {
         string result;
         char buffer = ~0;
@@ -695,6 +731,21 @@ namespace ocx { namespace arm {
             ERROR("failed to read address 0x%016lx", addr);
 
         return field;
+    }
+
+    static int modeflags(int mode) {
+        // bit 0 of mode stores "b" info, which is not needed for open
+        switch (mode >> 1) {
+        case 0: return O_RDONLY; // "r" and "rb"
+        case 1: return O_RDWR;   // "r+" and "r+b"
+        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
+        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
+        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
+        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
+        default:
+            ERROR("illegal open mode %d", mode);
+            return -1;
+        }
     }
 
     u64 core::semihosting(u32 call) {
@@ -753,9 +804,12 @@ namespace ocx { namespace arm {
 
             string file = semihosting_read_string(addr, size);
 
-            if (file == ":tt")
-                return (mode < 4) ? STDIN_FILENO : STDERR_FILENO;
-            return open(file.c_str(), mode);
+            if (file == ":tt") {
+                return (mode < 4) ? STDIN_FILENO :
+                       (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
+            }
+
+            return open(file.c_str(), modeflags(mode));
         }
 
         case SHC_CLOSE: {
@@ -789,19 +843,93 @@ namespace ocx { namespace arm {
             return isatty(file);
         }
 
-        case SHC_READ:
-        case SHC_SEEK:
-        case SHC_FLEN:
+        case SHC_FLEN: {
+            u64 fd = semihosting_read_field(0);
+            off_t curr = lseek(fd, 0, SEEK_CUR);
+            off_t size = lseek(fd, 0, SEEK_END);
+            lseek(fd, curr, SEEK_SET);
+            return size;
+        }
+
+        case SHC_READ: {
+            u64 file = semihosting_read_field(0);
+            u64 addr = semihosting_read_field(1);
+            u64 size = semihosting_read_field(2);
+
+            u8 buffer[4096];
+            size_t bytes_read = 0;
+            size_t bytes_todo = size;
+
+            while (bytes_todo > 0) {
+                size_t sz = bytes_todo;
+                if (sz > sizeof(buffer))
+                    sz = sizeof(buffer);
+
+                ssize_t n = read(file, buffer, sz);
+                if (n < 0) {
+                    INFO("arm semihosting read failure %s", strerror(errno));
+                    return bytes_todo;
+                }
+
+                if (n == 0)
+                    return bytes_todo;
+
+                if (write_mem(addr + bytes_read, buffer, n) != (size_t)n) {
+                    INFO("arm semihosting store failure");
+                    return bytes_todo;
+                }
+
+                bytes_read += n;
+                bytes_todo -= n;
+            }
+
+            return bytes_todo;
+        }
+
+        case SHC_SEEK: {
+            u64 file = semihosting_read_field(0);
+            u64 offset = semihosting_read_field(1);
+            if (lseek(file, offset, SEEK_SET) != (off_t)offset)
+                return -1;
+            return 0;
+        }
+
+        case SHC_ISERR: {
+            u64 status = semihosting_read_field(0);
+            return status ? -1  : 0; // assume 0 means "success"
+        }
+
+        case SHC_CMDLINE: {
+            u64 addr = semihosting_read_field(0);
+            u64 size = semihosting_read_field(1);
+
+            string cmdline(m_env.get_param("command_line"));
+            if (cmdline.empty())
+                return -1;
+
+            size_t length = cmdline.length();
+            if (length >= size)
+                length = size - 1;
+
+            u8 zero = 0;
+            const char* data = cmdline.c_str();
+
+            if (write_mem(addr, data, length) != length)
+                return -1;
+
+            if (write_mem(addr + length, &zero, 1) != 1)
+                return -1;
+
+            return 0;
+        }
+
         case SHC_TMPNAM:
         case SHC_REMOVE:
         case SHC_RENAME:
         case SHC_SYSTEM:
-        case SHC_ISERR:
-        case SHC_CMDLINE:
         case SHC_HEAP:
-
         default:
-            INFO("arm semihosting: unsupported call %u", call);
+            INFO("arm semihosting: unsupported call %x", call);
             break;
         }
 
