@@ -212,8 +212,9 @@ namespace ocx { namespace arm {
         csh lookup_disassembler() const;
         u64 get_program_counter() const;
 
-        size_t read_mem(u64 addr, void* buf, size_t bufsz);
-        size_t write_mem(u64 addr, const void* buf, size_t bufsz);
+        size_t read_mem_virt(u64 addr, void* buf, size_t bufsz);
+        size_t write_mem_virt(u64 addr, const void* buf, size_t bufsz);
+        size_t access_mem_phys(u64 addr, u8* buf, size_t bufsz, bool iswr);
         string semihosting_read_string(u64 addr, size_t n);
 
         u64 semihosting_get_reg(unsigned int no);
@@ -555,7 +556,7 @@ namespace ocx { namespace arm {
         ERROR_ON(bufsz == 0, "unexpected zero bufsz");
 
         u32 insn = 0;
-        u64 size = read_mem(addr, &insn, 4);
+        u64 size = read_mem_virt(addr, &insn, 4);
 
         if (!is_thumb() && size != 4)
             return 0;
@@ -631,7 +632,27 @@ namespace ocx { namespace arm {
         return val;
     }
 
-    size_t core::read_mem(u64 addr, void *buf, size_t bufsz) {
+    size_t core::access_mem_phys(u64 addr, u8 *buf, size_t bufsz, bool iswr) {
+        transaction tx;
+        tx.addr = addr;
+        tx.size = bufsz;
+        tx.data = buf;
+        tx.is_read = !iswr;
+        tx.is_debug = true;
+        tx.is_user = false;
+        tx.is_secure = false;
+        tx.is_insn = false;
+        tx.is_excl = false;
+        tx.is_lock = false;
+        tx.is_port = false;
+
+        if (m_env.transport(tx) != RESP_OK)
+            return 0;
+
+        return tx.size;
+    }
+
+    size_t core::read_mem_virt(u64 addr, void *buf, size_t bufsz) {
         uc_err ret;
         u64 phys = 0;
         const size_t pgsz = page_size();
@@ -649,9 +670,9 @@ namespace ocx { namespace arm {
             size_t size = std::min(bytes_remaining, page_remaining);
 
             try {
-                ret = uc_mem_read(m_uc, phys, bbuf, size);
-                if (ret != UC_ERR_OK)
-                    return bytes_read;
+                size_t page_read = access_mem_phys(phys, bbuf, size, false);
+                if (page_read != size)
+                    return bytes_read + page_read;
             } catch (...) {
                 fprintf(stderr, "error reading memory at %016lx\n", phys);
                 return bytes_read;
@@ -666,7 +687,7 @@ namespace ocx { namespace arm {
         return bytes_read;
     }
 
-    size_t core::write_mem(u64 addr, const void* buf, size_t bufsz) {
+    size_t core::write_mem_virt(u64 addr, const void* buf, size_t bufsz) {
         uc_err ret;
         u64 phys = 0;
         const size_t pgsz = page_size();
@@ -683,11 +704,11 @@ namespace ocx { namespace arm {
             size_t size = std::min(bytes_remaining, page_remaining);
 
             try {
-                 ret = uc_mem_write(m_uc, phys, bbuf, size);
-                 if (ret != UC_ERR_OK)
-                     return bytes_written;
+                 size_t page_written = access_mem_phys(phys, bbuf, size, true);
+                 if (page_written != size)
+                     return bytes_written + page_written;
              } catch (...) {
-                 fprintf(stderr, "error reading memory at %016lx\n", phys);
+                 fprintf(stderr, "error writing memory at %016lx\n", phys);
                  return bytes_written;
              }
 
@@ -705,7 +726,7 @@ namespace ocx { namespace arm {
         string result;
         char buffer = ~0;
         while (n-- && buffer != '\0') {
-            if (read_mem(addr++, (unsigned char*)&buffer, 1) != 1)
+            if (read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
                 ERROR("failed to read char at 0x%016lx", addr - 1);
             result += buffer;
         }
@@ -727,7 +748,7 @@ namespace ocx { namespace arm {
         u64 addr = semihosting_get_reg(1) + n * size;
         u64 field = 0;
 
-        if (read_mem(addr, (unsigned char*)&field, size) != size)
+        if (read_mem_virt(addr, (unsigned char*)&field, size) != size)
             ERROR("failed to read address 0x%016lx", addr);
 
         return field;
@@ -779,7 +800,7 @@ namespace ocx { namespace arm {
         case SHC_WRITEC: {
             unsigned char c;
             u64 addr = semihosting_get_reg(1);
-            if (read_mem(addr, &c, sizeof(c)) != sizeof(c))
+            if (read_mem_virt(addr, &c, sizeof(c)) != sizeof(c))
                 return ~0ull;
             putchar(c);
             return c;
@@ -789,7 +810,7 @@ namespace ocx { namespace arm {
             unsigned char c;
             u64 addr = semihosting_get_reg(1);
             do {
-                if (read_mem(addr++, &c, sizeof(c)) != sizeof(c))
+                if (read_mem_virt(addr++, &c, sizeof(c)) != sizeof(c))
                     break;
                 if (c != '\0')
                     putchar(c);
@@ -825,7 +846,7 @@ namespace ocx { namespace arm {
 
             while (size > 0) {
                 unsigned char buffer = 0;
-                if (read_mem(addr, &buffer, 1) != 1)
+                if (read_mem_virt(addr, &buffer, 1) != 1)
                     return size;
 
                 if (write(file, &buffer, 1) != 1)
@@ -874,7 +895,7 @@ namespace ocx { namespace arm {
                 if (n == 0)
                     return bytes_todo;
 
-                if (write_mem(addr + bytes_read, buffer, n) != (size_t)n) {
+                if (write_mem_virt(addr + bytes_read, buffer, n) != (size_t)n) {
                     INFO("arm semihosting store failure");
                     return bytes_todo;
                 }
@@ -914,10 +935,10 @@ namespace ocx { namespace arm {
             u8 zero = 0;
             const char* data = cmdline.c_str();
 
-            if (write_mem(addr, data, length) != length)
+            if (write_mem_virt(addr, data, length) != length)
                 return -1;
 
-            if (write_mem(addr + length, &zero, 1) != 1)
+            if (write_mem_virt(addr + length, &zero, 1) != 1)
                 return -1;
 
             return 0;
