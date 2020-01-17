@@ -411,6 +411,9 @@ namespace ocx { namespace arm {
 
     void core::reset() {
         u64 rvbaraddr = ~0ull;
+
+        // pc has already been reset to what reset_pc specifies, copy that
+        // address into RVBAR
         uc_reg_read(m_uc, UC_ARM64_REG_PC, &rvbaraddr);
         uc_reg_write(m_uc, UC_ARM64_REG_RVBAR, &rvbaraddr);
     }
