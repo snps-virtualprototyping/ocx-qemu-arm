@@ -416,6 +416,10 @@ namespace ocx { namespace arm {
         // address into RVBAR
         uc_reg_read(m_uc, UC_ARM64_REG_PC, &rvbaraddr);
         uc_reg_write(m_uc, UC_ARM64_REG_RVBAR, &rvbaraddr);
+
+        // actually reset cpu, PC gets set to RVBAR, which is why we updated
+        // that above; this also resets EL, PSTATE, etc.
+        uc_reset_cpu(m_uc);
     }
 
     void core::interrupt(u64 irq, bool set) {
