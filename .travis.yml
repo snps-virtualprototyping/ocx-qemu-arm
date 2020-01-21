@@ -7,7 +7,11 @@ compiler:
   - gcc
 
 env:
-  - BUILD=RELEASE
+  global:
+    # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+    # via the "travis encrypt" command using the project repo's public key
+    - secure: "UVIqI0UGt9BNd1veiJx962zya2/KS2pjGgfyeSz1DI5NU1V8uGwYoWiFQT3YgZgjXBwCjrg3TkrzzDzj2MjWNgLZwuKz1bgb4W+by0PA3LnagEmX7ZmEKOkDoVT3UTV5JFiswXmVWkDoAM/tBTf2IAdoQa/ps5vDbqB/wDw4jLEHba/eDWYGbDIrBeUjPOtvBGFHECiNl4ctiz9iuaTiZU9F+3vnZ482Dndi19dXsceOhp+auQ8yLYLCn0+Jn6iXyq1/d9vf/3kexVoIlYVPzfj2DkB3B/8Em6T/jBa9gwO74/hwhOLhp/LV5SFsdXzJeOcELkh7jxbp+Q9aOyt69uNOrGJbE/GDIOirj8H4GpJ3afbFw1wdBnqydrreHLTII6ruP5QAq+2ut0BsHn42ojyeA3omx4QUQqZNrf+y6DiFeLdk4VZbIWlUZEgyIt4rAV4bCNHvS/+DgMfdq1qEXbvgDzV0bO7AWGATteEUDglVLknybHff7IpSSe7AbKrTkANqRFLfhaHp6zb1dWdYC0zDQ29MSnsS0HKo/xU1DKigW7cUUEeCQ4R0QdlCka7xbVngxEP6vxEDNC/BMhCdEkHZLAq/oZIR4MYZONFz2yihePnRQslQZLoCNfH2L3TcjQeICDI11VSMsb8NUxvT25BvTLM5sNoH5rQRMDVkZd8="
+    - BUILD=RELEASE
 
 before_script:
   - mkdir BUILD && cd BUILD
@@ -15,3 +19,12 @@ before_script:
 
 script:
   - make && ctest --output-on-failure
+
+addons:
+  coverity_scan:
+    project:
+      name: "snps-virtualprototyping/ocx-qemu-arm"
+      description: "OpenCpuX/qemu-arm - Open Source Instruction-Set Simulation Integration Kit"
+    notification_email: tobies@synopsys.com
+    build_command: "make"
+    branch_pattern: master 
