@@ -874,8 +874,11 @@ namespace ocx { namespace arm {
         case SHC_FLEN: {
             u64 fd = semihosting_read_field(0);
             off_t curr = lseek(fd, 0, SEEK_CUR);
+            if (curr == -1) return -1;
             off_t size = lseek(fd, 0, SEEK_END);
-            lseek(fd, curr, SEEK_SET);
+            if (size == -1) return -1;
+            off_t res = lseek(fd, curr, SEEK_SET);
+            if (res == -1) return -1;
             return size;
         }
 
