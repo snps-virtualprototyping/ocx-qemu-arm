@@ -430,6 +430,7 @@ namespace ocx { namespace arm {
     }
 
     void core::notified(u64 eventid) {
+        /* coverity[unsigned_compare] */
         if (eventid < ARM_TIMER_PHYS || eventid > ARM_TIMER_SEC)
             ERROR("invalid timer index %lu", eventid);
         uc_err ret = uc_update_timer(m_uc, eventid);
