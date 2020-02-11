@@ -935,7 +935,11 @@ namespace ocx { namespace arm {
             u64 addr = semihosting_read_field(0);
             u64 size = semihosting_read_field(1);
 
-            string cmdline(m_env.get_param("command_line"));
+            const char* cmdline_str = m_env.get_param("command_line");
+            if (!cmdline_str)
+                return -1;
+
+            string cmdline(cmdline_str);
             if (cmdline.empty())
                 return -1;
 
