@@ -204,6 +204,8 @@ namespace ocx { namespace arm {
         csh          m_cap_thumb;
         u64          m_num_insn;
         u64          m_start_time_ms;
+        u64          m_procid;
+        u64          m_coreid;
 
         bool is_aarch64() const;
         bool is_aarch32() const;
@@ -259,7 +261,9 @@ namespace ocx { namespace arm {
         m_cap_aarch32(),
         m_cap_thumb(),
         m_num_insn(0),
-        m_start_time_ms(realtime_ms()) {
+        m_start_time_ms(realtime_ms()),
+        m_procid(0),
+        m_coreid(0) {
         uc_err ret = uc_open(m_model->name, this, &helper_config, &m_uc);
         ERROR_ON(ret != UC_ERR_OK, "unicorn error: %s", uc_strerror(ret));
 
@@ -370,6 +374,9 @@ namespace ocx { namespace arm {
             ret = uc_reg_write(m_uc, UC_ARM64_REG_VMPIDR, &id);
             ERROR_ON(ret != UC_ERR_OK, "error setting aarch64 vcore id");
         }
+
+        m_procid = procid;
+        m_coreid = coreid;
     }
 
     u64 core::step(u64 num_insn) {
@@ -420,6 +427,9 @@ namespace ocx { namespace arm {
         // actually reset cpu, PC gets set to RVBAR, which is why we updated
         // that above; this also resets EL, PSTATE, etc.
         uc_reset_cpu(m_uc);
+
+        // restore (V-)MPIDR values
+        set_id(m_procid, m_coreid);
     }
 
     void core::interrupt(u64 irq, bool set) {
