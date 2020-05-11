@@ -22,11 +22,15 @@ framework for ARMv7 and ARMv8 disassembly.
 
 ## How to build
 
+### For all platforms
+
 * Clone the repository and `cd` into the repository
 * Initialize and update the submodules:
 
         git submodule init
         git submodule update --init --recursive
+
+### Linux
 
 * Create a `BUILD` directory
 
@@ -68,6 +72,29 @@ framework for ARMv7 and ARMv8 disassembly.
 
             cd ../../..
         done
+
+### Visual Studio 2017 and up
+
+* Start Visual Studio 
+
+* Use File -> Open Folder... to open the directory to which you have cloned
+  the ocx-qemu-arm repository.
+
+* Visual Studio will detect that this is a CMake project and will generate the
+  necessary build files. Once this has completed ...
+
+* Build -> Build all
+
+* The module should pass the regression tests are specified by the ocx test
+  harness:
+
+  Test -> Run CTest for ocx-qemu-arm
+
+        Test project C:/msys64/home/tobies/ocx-qemu-arm/out/build/x64-Debug
+        Start 1: ocx-qemu-arm
+        1/1 Test #1: ocx-qemu-arm .....................   Passed    0.14 sec
+        100% tests passed, 0 tests failed out of 1
+        Total Test time (real) =   0.16 sec
 
 ## Supported core variants
 

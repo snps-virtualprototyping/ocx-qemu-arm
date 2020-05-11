@@ -2,5 +2,7 @@
 /.cproject
 /.settings
 /setup.sh
+/.vs
 
 /BUILD
+/out
