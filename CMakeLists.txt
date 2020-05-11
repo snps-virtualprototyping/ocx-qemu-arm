@@ -40,11 +40,7 @@ set_property(TARGET capstone-static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 set(OCX_BUILD_TESTS OFF CACHE BOOL "disable ocx tests" FORCE)
 
-if(MSVC)
-    add_subdirectory(${OCX_HOME} ocx)
-else()
-    add_subdirectory(${OCX_HOME} ocx EXCLUDE_FROM_ALL)
-endif()
+add_subdirectory(${OCX_HOME} ocx EXCLUDE_FROM_ALL)
 
 set(inc "${CMAKE_CURRENT_SOURCE_DIR}/ocx/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/capstone/include"
@@ -71,7 +67,7 @@ else()
     set(UNICORN_LIB ${UNICORN_HOME}/libunicorn.a)
 endif()
 
-add_dependencies(ocx-test-runner ocx-dummy-core)
+add_dependencies( ocx-qemu-arm ocx-test-runner ocx-dummy-core)
 
 target_include_directories(ocx-qemu-arm PRIVATE ${inc})
 

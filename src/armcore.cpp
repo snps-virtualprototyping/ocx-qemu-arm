@@ -32,7 +32,7 @@
 #include <io.h>
 #include <intrin.h>
 #include <immintrin.h>
-#  ifdef ERROR 
+#  ifdef ERROR
 #    undef ERROR
 #  endif
 #  ifdef min
@@ -42,12 +42,11 @@
 #    undef max
 #  endif
 #  define STDIN_FILENO  0
-#  define STDOUT_FILENO 1 
+#  define STDOUT_FILENO 1
 #  define STDERR_FILENO 2
-#  define GCC()
-#  pragma warning(disable: 4505 4996) 
+#  pragma warning(disable: 4505 4996)
 #else
-#  define GCC(arg) arg
+#  pragma GCC diagnostic ignored "-Wformat"
 #endif
 
 #define INFO(...)                                                             \
@@ -460,13 +459,13 @@ namespace ocx { namespace arm {
         if (irq >= sizeof(IRQMAP) / sizeof(IRQMAP[0]))
             return;
         uc_err ret = uc_interrupt(m_uc, IRQMAP[irq], set);
-        ERROR_ON(ret != UC_ERR_OK, "error dispatching irq (%I64u)", irq);
+        ERROR_ON(ret != UC_ERR_OK, "error dispatching irq (%llu)", irq);
     }
 
     void core::notified(u64 eventid) {
-        /* coverity[unsigned_compare] */
-        if (eventid < ARM_TIMER_PHYS || eventid > ARM_TIMER_SEC)
-            ERROR("invalid timer index %I64u", eventid);
+        static_assert(ARM_TIMER_PHYS == 0);
+        if (eventid > ARM_TIMER_SEC)
+            ERROR("invalid timer index %llu", eventid);
         uc_err ret = uc_update_timer(m_uc, (int)eventid);
         ERROR_ON(ret != UC_ERR_OK, "timer update: %s", uc_strerror(ret));
     }
@@ -484,17 +483,17 @@ namespace ocx { namespace arm {
     };
 
     size_t core::reg_size(u64 reg) {
-        ERROR_ON(reg >= num_regs(), "register index %I64u out of bounds", reg);
+        ERROR_ON(reg >= num_regs(), "register index %llu out of bounds", reg);
         return max(m_model->registers[reg].width / 8, 1);
     }
 
     const char* core::reg_name(u64 reg) {
-        ERROR_ON(reg >= num_regs(), "register index %I64u out of bounds", reg);
+        ERROR_ON(reg >= num_regs(), "register index %llu out of bounds", reg);
         return m_model->registers[reg].name;
     };
 
     bool core::read_reg(u64 idx, void* buf) {
-        ERROR_ON(idx >= num_regs(), "register index %I64u out of bounds", idx);
+        ERROR_ON(idx >= num_regs(), "register index %llu out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
         const u64 mask = gen_mask(r.width);
@@ -511,7 +510,7 @@ namespace ocx { namespace arm {
     }
 
     bool core::write_reg(u64 idx, const void *buf) {
-        ERROR_ON(idx >= num_regs(), "register index %I64u out of bounds", idx);
+        ERROR_ON(idx >= num_regs(), "register index %llu out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
         const u64 mask = gen_mask(r.width);
@@ -716,7 +715,7 @@ namespace ocx { namespace arm {
                 if (page_read != size)
                     return bytes_read + page_read;
             } catch (...) {
-                fprintf(stderr, "error reading memory at %016I64x\n", phys);
+                fprintf(stderr, "error reading memory at %016llx\n", phys);
                 return bytes_read;
             }
 
@@ -750,7 +749,7 @@ namespace ocx { namespace arm {
                  if (page_written != size)
                      return bytes_written + page_written;
              } catch (...) {
-                 fprintf(stderr, "error writing memory at %016I64x\n", phys);
+                 fprintf(stderr, "error writing memory at %016llx\n", phys);
                  return bytes_written;
              }
 
@@ -769,7 +768,7 @@ namespace ocx { namespace arm {
         char buffer = ~0;
         while (n-- && buffer != '\0') {
             if (read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
-                ERROR("failed to read char at 0x%016I64x", addr - 1);
+                ERROR("failed to read char at 0x%016llx", addr - 1);
             result += buffer;
         }
 
@@ -791,7 +790,7 @@ namespace ocx { namespace arm {
         u64 field = 0;
 
         if (read_mem_virt(addr, (unsigned char*)&field, size) != size)
-            ERROR("failed to read address 0x%016I64x", addr);
+            ERROR("failed to read address 0x%016llx", addr);
 
         return field;
     }
@@ -1013,7 +1012,7 @@ namespace ocx { namespace arm {
 #else
 		typedef unsigned __int128 u128;
 		u128 result = (u128)mult1 * (u128)mult2 / quot;
-		result_high = (u64)(result >> 64);
+		*result_high = (u64)(result >> 64);
 		return (u64)result;
 #endif
 	}
@@ -1051,6 +1050,7 @@ namespace ocx { namespace arm {
 
     uc_tx_result_t core::helper_transport(uc_engine* uc, void* opaque,
                                           uc_mmio_tx_t* tx) {
+        (void)uc;
         core* cpu = (core*)opaque;
 
         transaction xt = {
@@ -1075,6 +1075,7 @@ namespace ocx { namespace arm {
 
     bool core::helper_dmi(uc_engine* uc, void* opaque, u64 page_addr,
                           unsigned char** dmiptr, int* prot) {
+        (void)uc;
         core* cpu = (core*)opaque;
 
         u8 *read = cpu->m_env.get_page_ptr_r(page_addr);
@@ -1183,8 +1184,8 @@ namespace ocx { namespace arm {
 
     core* create_instance(u64 api_version, env& e, const char* variant) {
         if (api_version != OCX_API_VERSION) {
-            INFO("OCX_API_VERSION mismatch: requested %I64u - "
-                 "expected %I64u", api_version, OCX_API_VERSION);
+            INFO("OCX_API_VERSION mismatch: requested %llu - "
+                 "expected %llu", api_version, OCX_API_VERSION);
             return nullptr;
         }
 
