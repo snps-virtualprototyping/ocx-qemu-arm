@@ -4,6 +4,8 @@
  * LICENSE file in the root directory of this source tree.
  ******************************************************************************/
 
+#define OCX_DLL_EXPORT
+
 #include <ocx/ocx.h>
 
 #include <unicorn/arm64.h>
@@ -11,6 +13,7 @@
 #include <capstone/capstone.h>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -24,6 +27,28 @@
 #include <fcntl.h>
 
 #include "modeldb.h"
+
+#ifdef _MSC_VER
+#include <io.h>
+#include <intrin.h>
+#include <immintrin.h>
+#  ifdef ERROR 
+#    undef ERROR
+#  endif
+#  ifdef min
+#    undef min
+#  endif
+#  ifdef max
+#    undef max
+#  endif
+#  define STDIN_FILENO  0
+#  define STDOUT_FILENO 1 
+#  define STDERR_FILENO 2
+#  define GCC()
+#  pragma warning(disable: 4505 4996) 
+#else
+#  define GCC(arg) arg
+#endif
 
 #define INFO(...)                                                             \
     do {                                                                      \
@@ -75,9 +100,9 @@ namespace ocx { namespace arm {
     }
 
     static u64 realtime_ms() {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        return (ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
+		using namespace std::chrono;
+		auto now = high_resolution_clock::now();
+		return time_point_cast<milliseconds>(now).time_since_epoch().count();
     }
 
     static uc_tx_result_t translate_response(response resp) {
@@ -95,7 +120,6 @@ namespace ocx { namespace arm {
 
         default:
             ERROR("unexpected response (%d)", resp);
-            return UC_TX_ERROR;
         }
     }
 
@@ -305,20 +329,20 @@ namespace ocx { namespace arm {
         if (modl->has_aarch64()) {
             cs_arch arch = CS_ARCH_ARM64;
             cs_mode mode = CS_MODE_LITTLE_ENDIAN;
-            cs_err ret = cs_open(arch, mode, &m_cap_aarch64);
-            ERROR_ON(ret != CS_ERR_OK, "error starting capstone disassembler");
+            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch64);
+            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
         }
 
         if (modl->has_aarch32()) {
             cs_arch arch = CS_ARCH_ARM;
             cs_mode mode = CS_MODE_LITTLE_ENDIAN;
-            cs_err ret = cs_open(arch, mode, &m_cap_aarch32);
-            ERROR_ON(ret != CS_ERR_OK, "error starting capstone disassembler");
+            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch32);
+            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
 
             arch = CS_ARCH_ARM;
             mode = CS_MODE_THUMB;
-            ret = cs_open(arch, mode, &m_cap_thumb);
-            ERROR_ON(ret != CS_ERR_OK, "error starting capstone disassembler");
+            cs_ret = cs_open(arch, mode, &m_cap_thumb);
+            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
         }
     }
 
@@ -436,14 +460,14 @@ namespace ocx { namespace arm {
         if (irq >= sizeof(IRQMAP) / sizeof(IRQMAP[0]))
             return;
         uc_err ret = uc_interrupt(m_uc, IRQMAP[irq], set);
-        ERROR_ON(ret != UC_ERR_OK, "error dispatching irq (%lu)", irq);
+        ERROR_ON(ret != UC_ERR_OK, "error dispatching irq (%I64u)", irq);
     }
 
     void core::notified(u64 eventid) {
         /* coverity[unsigned_compare] */
         if (eventid < ARM_TIMER_PHYS || eventid > ARM_TIMER_SEC)
-            ERROR("invalid timer index %lu", eventid);
-        uc_err ret = uc_update_timer(m_uc, eventid);
+            ERROR("invalid timer index %I64u", eventid);
+        uc_err ret = uc_update_timer(m_uc, (int)eventid);
         ERROR_ON(ret != UC_ERR_OK, "timer update: %s", uc_strerror(ret));
     }
 
@@ -460,17 +484,17 @@ namespace ocx { namespace arm {
     };
 
     size_t core::reg_size(u64 reg) {
-        ERROR_ON(reg >= num_regs(), "register index %lu out of bounds", reg);
+        ERROR_ON(reg >= num_regs(), "register index %I64u out of bounds", reg);
         return max(m_model->registers[reg].width / 8, 1);
     }
 
     const char* core::reg_name(u64 reg) {
-        ERROR_ON(reg >= num_regs(), "register index %lu out of bounds", reg);
+        ERROR_ON(reg >= num_regs(), "register index %I64u out of bounds", reg);
         return m_model->registers[reg].name;
     };
 
     bool core::read_reg(u64 idx, void* buf) {
-        ERROR_ON(idx >= num_regs(), "register index %lu out of bounds", idx);
+        ERROR_ON(idx >= num_regs(), "register index %I64u out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
         const u64 mask = gen_mask(r.width);
@@ -487,7 +511,7 @@ namespace ocx { namespace arm {
     }
 
     bool core::write_reg(u64 idx, const void *buf) {
-        ERROR_ON(idx >= num_regs(), "register index %lu out of bounds", idx);
+        ERROR_ON(idx >= num_regs(), "register index %I64u out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
         const u64 mask = gen_mask(r.width);
@@ -692,7 +716,7 @@ namespace ocx { namespace arm {
                 if (page_read != size)
                     return bytes_read + page_read;
             } catch (...) {
-                fprintf(stderr, "error reading memory at %016lx\n", phys);
+                fprintf(stderr, "error reading memory at %016I64x\n", phys);
                 return bytes_read;
             }
 
@@ -726,7 +750,7 @@ namespace ocx { namespace arm {
                  if (page_written != size)
                      return bytes_written + page_written;
              } catch (...) {
-                 fprintf(stderr, "error writing memory at %016lx\n", phys);
+                 fprintf(stderr, "error writing memory at %016I64x\n", phys);
                  return bytes_written;
              }
 
@@ -745,7 +769,7 @@ namespace ocx { namespace arm {
         char buffer = ~0;
         while (n-- && buffer != '\0') {
             if (read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
-                ERROR("failed to read char at 0x%016lx", addr - 1);
+                ERROR("failed to read char at 0x%016I64x", addr - 1);
             result += buffer;
         }
 
@@ -767,7 +791,7 @@ namespace ocx { namespace arm {
         u64 field = 0;
 
         if (read_mem_virt(addr, (unsigned char*)&field, size) != size)
-            ERROR("failed to read address 0x%016lx", addr);
+            ERROR("failed to read address 0x%016I64x", addr);
 
         return field;
     }
@@ -783,7 +807,6 @@ namespace ocx { namespace arm {
         case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
         default:
             ERROR("illegal open mode %d", mode);
-            return -1;
         }
     }
 
@@ -803,11 +826,11 @@ namespace ocx { namespace arm {
 
         case SHC_EXIT:
             INFO("arm semihosting: software exit request");
-            exit(semihosting_get_reg(1));
+            exit((int)semihosting_get_reg(1));
 
         case SHC_EXIT2:
             INFO("arm semihosting: software exit request");
-            exit(semihosting_get_reg(1) >> 32);
+            exit((int)(semihosting_get_reg(1) >> 32));
 
         case SHC_READC:
             return getchar();
@@ -848,12 +871,12 @@ namespace ocx { namespace arm {
                        (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
             }
 
-            return open(file.c_str(), modeflags(mode));
+            return open(file.c_str(), modeflags((int)mode));
         }
 
         case SHC_CLOSE: {
             u64 file = semihosting_read_field(0);
-            close(file);
+            close((int)file);
             return 0;
         }
 
@@ -867,7 +890,7 @@ namespace ocx { namespace arm {
                 if (read_mem_virt(addr, &buffer, 1) != 1)
                     return size;
 
-                if (write(file, &buffer, 1) != 1)
+                if (write((int)file, &buffer, 1) != 1)
                     return size;
 
                 size--;
@@ -879,17 +902,17 @@ namespace ocx { namespace arm {
 
         case SHC_ISTTY: {
             u64 file = semihosting_read_field(0);
-            return isatty(file);
+            return isatty((int)file);
         }
 
         case SHC_FLEN: {
-            u64 fd = semihosting_read_field(0);
+            int fd = (int)semihosting_read_field(0);
             off_t curr = lseek(fd, 0, SEEK_CUR);
-            if (curr == -1) return -1;
+            if (curr == -1) return (u64)-1;
             off_t size = lseek(fd, 0, SEEK_END);
-            if (size == -1) return -1;
+            if (size == -1) return (u64)-1;
             off_t res = lseek(fd, curr, SEEK_SET);
-            if (res == -1) return -1;
+            if (res == -1) return (u64)-1;
             return size;
         }
 
@@ -907,7 +930,7 @@ namespace ocx { namespace arm {
                 if (sz > sizeof(buffer))
                     sz = sizeof(buffer);
 
-                ssize_t n = read(file, buffer, sz);
+                ssize_t n = read((int)file, buffer, (unsigned int)sz);
                 if (n < 0) {
                     INFO("arm semihosting read failure %s", strerror(errno));
                     return bytes_todo;
@@ -931,14 +954,14 @@ namespace ocx { namespace arm {
         case SHC_SEEK: {
             u64 file = semihosting_read_field(0);
             u64 offset = semihosting_read_field(1);
-            if (lseek(file, offset, SEEK_SET) != (off_t)offset)
-                return -1;
+            if (lseek((int)file, (long)offset, SEEK_SET) != (off_t)offset)
+                return (u64)-1;
             return 0;
         }
 
         case SHC_ISERR: {
             u64 status = semihosting_read_field(0);
-            return status ? -1  : 0; // assume 0 means "success"
+            return status ? (u64)-1  : 0; // assume 0 means "success"
         }
 
         case SHC_CMDLINE: {
@@ -947,11 +970,11 @@ namespace ocx { namespace arm {
 
             const char* cmdline_str = m_env.get_param("command_line");
             if (!cmdline_str)
-                return -1;
+                return (u64)-1;
 
             string cmdline(cmdline_str);
             if (cmdline.empty())
-                return -1;
+                return (u64)-1;
 
             size_t length = cmdline.length();
             if (length >= size)
@@ -961,10 +984,10 @@ namespace ocx { namespace arm {
             const char* data = cmdline.c_str();
 
             if (write_mem_virt(addr, data, length) != length)
-                return -1;
+                return (u64)-1;
 
             if (write_mem_virt(addr + length, &zero, 1) != 1)
-                return -1;
+                return (u64)-1;
 
             return 0;
         }
@@ -982,10 +1005,24 @@ namespace ocx { namespace arm {
         return ~0ull;
     }
 
+	inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, u64* result_high) {
+#ifdef _MSC_VER
+		u64 prod, prod_high;
+		prod = _umul128(mult1, mult2, &prod_high);
+		return _udiv128(prod, prod_high, quot, result_high);
+#else
+		typedef unsigned __int128 u128;
+		u128 result = (u128)mult1 * (u128)mult2 / quot;
+		result_high = (u64)(result >> 64);
+		return (u64)result;
+#endif
+	}
+
     uint64_t core::helper_time(void* opaque, u64 clock) {
         core* cpu = (core*)opaque;
-        u128 ticks = (u128)cpu->m_env.get_time_ps() * (u128)clock / PS_PER_SEC;
-        ERROR_ON(ticks > ~0ull, "ticks out of bounds");
+		u64 ticks, ticks_high;
+		ticks = mult_div_128(cpu->m_env.get_time_ps(), clock, PS_PER_SEC, &ticks_high);
+        ERROR_ON(ticks_high != 0, "ticks out of bounds");
         return ticks;
     }
 
@@ -1005,10 +1042,11 @@ namespace ocx { namespace arm {
             return;
         }
 
-        u128 time_ps = (u128)ticks * (u128)PS_PER_SEC / (u128)clock;
-        if (time_ps > UINT64_MAX)
+		u64 time_ps, time_ps_high;
+		time_ps = mult_div_128(ticks, PS_PER_SEC, clock, &time_ps_high);
+        if (time_ps_high != 0)
             time_ps = UINT64_MAX;
-        cpu->m_env.notify(idx, (u64)time_ps);
+        cpu->m_env.notify(idx, time_ps);
     }
 
     uc_tx_result_t core::helper_transport(uc_engine* uc, void* opaque,
@@ -1016,17 +1054,17 @@ namespace ocx { namespace arm {
         core* cpu = (core*)opaque;
 
         transaction xt = {
-            .addr = tx->addr,
-            .size = tx->size,
-            .data = (u8*)tx->data,
-            .is_read = tx->is_read,
-            .is_user = tx->is_user,
-            .is_secure = tx->is_secure,
-            .is_insn = false,
-            .is_excl = uc_is_excl(cpu->m_uc),
-            .is_lock = false,
-            .is_port = tx->is_io,
-            .is_debug = uc_is_debug(cpu->m_uc)
+            /*.addr = */        tx->addr,
+            /*.size = */        tx->size,
+            /*.data = */        (u8*)tx->data,
+            /*.is_read = */     tx->is_read,
+            /*.is_user = */     tx->is_user,
+            /*.is_secure = */   tx->is_secure,
+            /*.is_insn = */     false,
+            /*.is_excl = */     uc_is_excl(cpu->m_uc),
+            /*.is_lock = */     false,
+            /*.is_port = */     tx->is_io,
+            /*.is_debug = */    uc_is_debug(cpu->m_uc)
         };
 
         response resp = cpu->m_env.transport(xt);
@@ -1145,8 +1183,8 @@ namespace ocx { namespace arm {
 
     core* create_instance(u64 api_version, env& e, const char* variant) {
         if (api_version != OCX_API_VERSION) {
-            INFO("OCX_API_VERSION mismatch: requested %lu - "
-                 "expected %llu", api_version, OCX_API_VERSION);
+            INFO("OCX_API_VERSION mismatch: requested %I64u - "
+                 "expected %I64u", api_version, OCX_API_VERSION);
             return nullptr;
         }
 

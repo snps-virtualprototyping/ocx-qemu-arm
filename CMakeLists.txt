@@ -39,14 +39,27 @@ add_subdirectory(${CAPSTONE_HOME} capstone EXCLUDE_FROM_ALL)
 set_property(TARGET capstone-static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 set(OCX_BUILD_TESTS OFF CACHE BOOL "disable ocx tests" FORCE)
-add_subdirectory(${OCX_HOME} ocx EXCLUDE_FROM_ALL)
 
-ExternalProject_Add(unicorn-build
-                    SOURCE_DIR "${UNICORN_HOME}"
-                    BUILD_IN_SOURCE 1
-                    CONFIGURE_COMMAND ""
-                    BUILD_COMMAND make UNICORN_STATIC=yes UNICORN_DYNAMIC=no UNICORN_DEBUG=${UNICORN_DEBUG}
-                    INSTALL_COMMAND "")
+if(MSVC)
+    add_subdirectory(${OCX_HOME} ocx)
+else()
+    add_subdirectory(${OCX_HOME} ocx EXCLUDE_FROM_ALL)
+endif()
+
+if (MSVC) 
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/unicorn.lib)
+    file(COPY ${UNICORN_HOME}/prebuilt/unicorn.dll DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+else()
+	ExternalProject_Add(unicorn-build
+		                SOURCE_DIR "${UNICORN_HOME}"
+			            BUILD_IN_SOURCE 1
+				        CONFIGURE_COMMAND ""
+					    BUILD_COMMAND make UNICORN_STATIC=yes UNICORN_DYNAMIC=no UNICORN_DEBUG=${UNICORN_DEBUG}
+						INSTALL_COMMAND "")
+	add_dependencies(ocx-qemu-arm unicorn-buildcore)
+    set(UNICORN_LIB ${UNICORN_HOME}/libunicorn.a)
+endif()
 
 set(inc "${CMAKE_CURRENT_SOURCE_DIR}/ocx/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/capstone/include"
@@ -55,11 +68,19 @@ set(src "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(sources "${src}/armcore.cpp" "${src}/modeldb.cpp")
 
 add_library(ocx-qemu-arm MODULE ${sources})
-add_dependencies(ocx-qemu-arm unicorn-build ocx-test-runner ocx-dummy-core)
+add_dependencies(ocx-test-runner ocx-dummy-core)
 
 target_include_directories(ocx-qemu-arm PRIVATE ${inc})
-target_compile_options(ocx-qemu-arm PRIVATE -Werror -Wall)
-target_link_libraries(ocx-qemu-arm ${UNICORN_HOME}/libunicorn.a capstone-static)
+
+if (MSVC)
+    # warning level 3 and all warnings as errors
+	target_compile_options(ocx-qemu-arm PRIVATE /W3 /WX)
+else()
+    # lots of warnings and all warnings as errors
+	target_compile_options(ocx-qemu-arm PRIVATE -Werror -Wall -Wextra)
+endif()
+
+target_link_libraries(ocx-qemu-arm ${UNICORN_LIB} capstone-static)
 
 install(TARGETS ocx-qemu-arm DESTINATION lib)
 

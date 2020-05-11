@@ -452,8 +452,8 @@ namespace ocx { namespace arm {
     static const reg* REGS64 = lookup_reg(UC_ARM64_REG_X0);
     static const reg* REGS32 = lookup_reg(UC_ARM_REG_R0);
 
-    static const unsigned int NREGS64 = lookup_reg(~0) - REGS64;
-    static const unsigned int NREGS32 = lookup_reg(~0) - REGS32;
+    static const unsigned int NREGS64 = (unsigned int)(lookup_reg(~0) - REGS64);
+    static const unsigned int NREGS32 = (unsigned int)(lookup_reg(~0) - REGS32);
 
     static const model g_modeldb[] = {
         { "Cortex-M0",  "ARMv7-M", 32, REGS32, NREGS32 },
