@@ -463,7 +463,7 @@ namespace ocx { namespace arm {
     }
 
     void core::notified(u64 eventid) {
-        static_assert(ARM_TIMER_PHYS == 0);
+        static_assert(ARM_TIMER_PHYS == 0, "unexpected ARM_TIMER_PHYS value");
         if (eventid > ARM_TIMER_SEC)
             ERROR("invalid timer index %llu", eventid);
         uc_err ret = uc_update_timer(m_uc, (int)eventid);
