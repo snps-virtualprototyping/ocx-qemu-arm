@@ -48,8 +48,10 @@ endif()
 
 if (MSVC) 
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/unicorn.lib)
-    file(COPY ${UNICORN_HOME}/prebuilt/unicorn.dll DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/unicorn.a 
+                    ${UNICORN_HOME}/prebuilt/libgcc.a 
+                    ${UNICORN_HOME}/prebuilt/libmingw32.a 
+                    ${UNICORN_HOME}/prebuilt/libmingwex.a)
 else()
 	ExternalProject_Add(unicorn-build
 		                SOURCE_DIR "${UNICORN_HOME}"
