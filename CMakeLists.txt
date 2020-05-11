@@ -46,23 +46,6 @@ else()
     add_subdirectory(${OCX_HOME} ocx EXCLUDE_FROM_ALL)
 endif()
 
-if (MSVC) 
-    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/unicorn.a 
-                    ${UNICORN_HOME}/prebuilt/libgcc.a 
-                    ${UNICORN_HOME}/prebuilt/libmingw32.a 
-                    ${UNICORN_HOME}/prebuilt/libmingwex.a)
-else()
-	ExternalProject_Add(unicorn-build
-		                SOURCE_DIR "${UNICORN_HOME}"
-			            BUILD_IN_SOURCE 1
-				        CONFIGURE_COMMAND ""
-					    BUILD_COMMAND make UNICORN_STATIC=yes UNICORN_DYNAMIC=no UNICORN_DEBUG=${UNICORN_DEBUG}
-						INSTALL_COMMAND "")
-	add_dependencies(ocx-qemu-arm unicorn-buildcore)
-    set(UNICORN_LIB ${UNICORN_HOME}/libunicorn.a)
-endif()
-
 set(inc "${CMAKE_CURRENT_SOURCE_DIR}/ocx/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/capstone/include"
         "${UNICORN_HOME}/include")
@@ -70,6 +53,24 @@ set(src "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(sources "${src}/armcore.cpp" "${src}/modeldb.cpp")
 
 add_library(ocx-qemu-arm MODULE ${sources})
+
+if (MSVC)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/unicorn.a
+                    ${UNICORN_HOME}/prebuilt/libgcc.a
+                    ${UNICORN_HOME}/prebuilt/libmingw32.a
+                    ${UNICORN_HOME}/prebuilt/libmingwex.a)
+else()
+    ExternalProject_Add(unicorn-build
+		        SOURCE_DIR "${UNICORN_HOME}"
+			BUILD_IN_SOURCE 1
+			CONFIGURE_COMMAND ""
+			BUILD_COMMAND make UNICORN_STATIC=yes UNICORN_DYNAMIC=no UNICORN_DEBUG=${UNICORN_DEBUG}
+			INSTALL_COMMAND "")
+    add_dependencies(ocx-qemu-arm unicorn-build)
+    set(UNICORN_LIB ${UNICORN_HOME}/libunicorn.a)
+endif()
+
 add_dependencies(ocx-test-runner ocx-dummy-core)
 
 target_include_directories(ocx-qemu-arm PRIVATE ${inc})
