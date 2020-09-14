@@ -42,8 +42,8 @@ set(OCX_BUILD_TESTS OFF CACHE BOOL "disable ocx tests" FORCE)
 
 add_subdirectory(${OCX_HOME} ocx EXCLUDE_FROM_ALL)
 
-set(inc "${CMAKE_CURRENT_SOURCE_DIR}/ocx/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/capstone/include"
+set(inc "${OCX_HOME}/include"
+        "${CAPSTONE_HOME}/include"
         "${UNICORN_HOME}/include")
 set(src "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(sources "${src}/armcore.cpp" "${src}/modeldb.cpp")
@@ -58,11 +58,11 @@ if (MSVC)
                     ${UNICORN_HOME}/prebuilt/libmingwex.a)
 else()
     ExternalProject_Add(unicorn-build
-		        SOURCE_DIR "${UNICORN_HOME}"
-			BUILD_IN_SOURCE 1
-			CONFIGURE_COMMAND ""
-			BUILD_COMMAND make UNICORN_STATIC=yes UNICORN_DYNAMIC=no UNICORN_DEBUG=${UNICORN_DEBUG}
-			INSTALL_COMMAND "")
+                        SOURCE_DIR "${UNICORN_HOME}"
+                        BUILD_IN_SOURCE 1
+                        CONFIGURE_COMMAND ""
+                        BUILD_COMMAND make UNICORN_STATIC=yes UNICORN_DYNAMIC=no UNICORN_DEBUG=${UNICORN_DEBUG}
+                        INSTALL_COMMAND "")
     add_dependencies(ocx-qemu-arm unicorn-build)
     set(UNICORN_LIB ${UNICORN_HOME}/libunicorn.a)
 endif()
@@ -73,10 +73,10 @@ target_include_directories(ocx-qemu-arm PRIVATE ${inc})
 
 if (MSVC)
     # warning level 3 and all warnings as errors
-	target_compile_options(ocx-qemu-arm PRIVATE /W3 /WX)
+    target_compile_options(ocx-qemu-arm PRIVATE /W3 /WX)
 else()
     # lots of warnings and all warnings as errors
-	target_compile_options(ocx-qemu-arm PRIVATE -Werror -Wall -Wextra)
+    target_compile_options(ocx-qemu-arm PRIVATE -Werror -Wall -Wextra)
 endif()
 
 target_link_libraries(ocx-qemu-arm ${UNICORN_LIB} capstone-static)

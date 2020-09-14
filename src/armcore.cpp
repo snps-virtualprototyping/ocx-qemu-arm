@@ -99,9 +99,9 @@ namespace ocx { namespace arm {
     }
 
     static u64 realtime_ms() {
-		using namespace std::chrono;
-		auto now = high_resolution_clock::now();
-		return time_point_cast<milliseconds>(now).time_since_epoch().count();
+        using namespace std::chrono;
+        auto now = high_resolution_clock::now();
+        return time_point_cast<milliseconds>(now).time_since_epoch().count();
     }
 
     static uc_tx_result_t translate_response(response resp) {
@@ -762,7 +762,6 @@ namespace ocx { namespace arm {
          return bytes_written;
     }
 
-
     string core::semihosting_read_string(u64 addr, size_t n) {
         string result;
         char buffer = ~0;
@@ -1004,23 +1003,23 @@ namespace ocx { namespace arm {
         return ~0ull;
     }
 
-	inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, u64* result_high) {
+    inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, u64* result_high) {
 #ifdef _MSC_VER
-		u64 prod, prod_high;
-		prod = _umul128(mult1, mult2, &prod_high);
-		return _udiv128(prod, prod_high, quot, result_high);
+        u64 prod, prod_high;
+        prod = _umul128(mult1, mult2, &prod_high);
+        return _udiv128(prod, prod_high, quot, result_high);
 #else
-		typedef unsigned __int128 u128;
-		u128 result = (u128)mult1 * (u128)mult2 / quot;
-		*result_high = (u64)(result >> 64);
-		return (u64)result;
+        typedef unsigned __int128 u128;
+        u128 result = (u128)mult1 * (u128)mult2 / quot;
+        *result_high = (u64)(result >> 64);
+        return (u64)result;
 #endif
-	}
+    }
 
     uint64_t core::helper_time(void* opaque, u64 clock) {
         core* cpu = (core*)opaque;
-		u64 ticks, ticks_high;
-		ticks = mult_div_128(cpu->m_env.get_time_ps(), clock, PS_PER_SEC, &ticks_high);
+        u64 ticks, ticks_high;
+        ticks = mult_div_128(cpu->m_env.get_time_ps(), clock, PS_PER_SEC, &ticks_high);
         ERROR_ON(ticks_high != 0, "ticks out of bounds");
         return ticks;
     }
@@ -1041,8 +1040,8 @@ namespace ocx { namespace arm {
             return;
         }
 
-		u64 time_ps, time_ps_high;
-		time_ps = mult_div_128(ticks, PS_PER_SEC, clock, &time_ps_high);
+        u64 time_ps, time_ps_high;
+        time_ps = mult_div_128(ticks, PS_PER_SEC, clock, &time_ps_high);
         if (time_ps_high != 0)
             time_ps = UINT64_MAX;
         cpu->m_env.notify(idx, time_ps);
@@ -1073,22 +1072,31 @@ namespace ocx { namespace arm {
         return translate_response(resp);
     }
 
-    bool core::helper_dmi(uc_engine* uc, void* opaque, u64 page_addr,
+    bool core::helper_dmi(uc_engine* uc, void* opaque, u64 page,
                           unsigned char** dmiptr, int* prot) {
         (void)uc;
         core* cpu = (core*)opaque;
 
-        u8 *read = cpu->m_env.get_page_ptr_r(page_addr);
-        if (!read)
+        u8* r = nullptr;
+        u8* w = nullptr;
+        u8* x = nullptr;
+
+        if (!prot || !*prot)
             return false;
 
-        *prot = UC_PROT_READ | UC_PROT_EXEC;
-        u8 *write = cpu->m_env.get_page_ptr_w(page_addr);
+        if ((*prot & UC_PROT_READ)  && !(r = cpu->m_env.get_page_ptr_r(page)))
+            return false;
+        if ((*prot & UC_PROT_WRITE) && !(w = cpu->m_env.get_page_ptr_w(page)))
+            return false;
+        if ((*prot & UC_PROT_EXEC)  && !(x = cpu->m_env.get_page_ptr_x(page)))
+            return false;
 
-        if (read == write)
-            *prot |= UC_PROT_WRITE;
+        if (w && r && w != r)
+            return false;
+        if (x && r && x != r)
+            return false;
 
-        *dmiptr = read;
+        *dmiptr = r ?: w ?: x;
         return true;
     }
 
