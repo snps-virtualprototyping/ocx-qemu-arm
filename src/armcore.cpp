@@ -218,6 +218,9 @@ namespace ocx { namespace arm {
         virtual void invalidate_page_ptrs() override;
         virtual void invalidate_page_ptr(u64 pgaddr) override;
 
+        virtual void tb_flush() override;
+        virtual void tb_flush_page(u64 start, u64 end) override;
+
     private:
         uc_engine*   m_uc;
         env&         m_env;
@@ -629,6 +632,16 @@ namespace ocx { namespace arm {
     void core::invalidate_page_ptr(u64 pgaddr) {
         uc_err ret = uc_dmi_invalidate(m_uc, pgaddr, pgaddr + PAGE_SIZE - 1);
         ERROR_ON(ret != UC_ERR_OK, "failed to invalidate dmi ptr");
+    }
+
+    void core::tb_flush() {
+        uc_err ret = uc_tb_flush(m_uc);
+        ERROR_ON(ret != UC_ERR_OK, "failed to flush TBs");
+    }
+
+    void core::tb_flush_page(u64 start, u64 end) {
+        uc_err ret = uc_tb_flush_page(m_uc, start, end);
+        ERROR_ON(ret != UC_ERR_OK, "failed to flush TB page rage");
     }
 
     bool core::is_aarch64() const {
