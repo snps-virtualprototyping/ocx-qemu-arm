@@ -575,18 +575,20 @@ namespace ocx { namespace arm {
             break;
 
         case TLB_FLUSH_PAGE:
-            ret = uc_tlb_flush_page(m_uc, *(uint64_t*)arg);
+            ret = uc_tlb_flush_page(m_uc, (uint64_t)arg);
             ERROR_ON(ret != UC_ERR_OK, "failed to flush TLB entry");
             break;
 
         case TLB_FLUSH_MMUIDX:
-            ret = uc_tlb_flush_mmuidx(m_uc, *(uint16_t*)arg);
+            ret = uc_tlb_flush_mmuidx(m_uc, (uint16_t)(uintptr_t)arg);
             ERROR_ON(ret != UC_ERR_OK, "failed to flush TLB");
             break;
 
         case TLB_FLUSH_PAGE_MMUIDX: {
-            pair<u64, uint16_t> args(*(pair<u64, uint16_t>*)arg);
-            ret = uc_tlb_flush_page_mmuidx(m_uc, args.first, args.second);
+            const uintptr_t PAGE_MASK = 0xfff;
+            const uint64_t addr = (uintptr_t)arg & ~PAGE_MASK;
+            const uint16_t idxmap = (uint16_t)((uintptr_t)arg & PAGE_MASK);
+            ret = uc_tlb_flush_page_mmuidx(m_uc, addr, idxmap);
             ERROR_ON(ret != UC_ERR_OK, "failed to flush TLB entry");
             break;
         }
@@ -1120,19 +1122,22 @@ namespace ocx { namespace arm {
 
     void core::helper_tlb_cluster_flush_page(void* opaque, u64 addr) {
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE, &addr);
+        cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE, (void*)addr);
     }
 
     void core::helper_tlb_cluster_flush_mmuidx(void* opaque, uint16_t idxmap) {
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH_MMUIDX, &idxmap);
+        cpu->m_env.broadcast_syscall(TLB_FLUSH_MMUIDX, (void*)(uintptr_t)idxmap);
     }
 
     void core::helper_tlb_cluster_flush_page_mmuidx(void* opaque, u64 addr,
                                                     uint16_t idxmap) {
-        pair<u64, uint16_t> arg(addr, idxmap);
+        const uintptr_t PAGE_MASK = 0xfff;
+        ERROR_ON(addr & PAGE_MASK, "unexpected low bits set in addr");
+        ERROR_ON((uintptr_t)idxmap & ~PAGE_MASK, "high bits set in idxmap");
+        uintptr_t arg = addr | (uintptr_t)idxmap;
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE_MMUIDX, &arg);
+        cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE_MMUIDX, (void*)arg);
     }
 
     void core::helper_breakpoint(void* opaque, u64 addr) {
