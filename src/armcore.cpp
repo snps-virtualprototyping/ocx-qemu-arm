@@ -232,6 +232,7 @@ namespace ocx { namespace arm {
         u64          m_start_time_ms;
         u64          m_procid;
         u64          m_coreid;
+        bool         m_async_tlb_flushing;
 
         bool is_aarch64() const;
         bool is_aarch32() const;
@@ -346,6 +347,15 @@ namespace ocx { namespace arm {
             cs_ret = cs_open(arch, mode, &m_cap_thumb);
             ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
         }
+
+        const char* async_tlb_flushing = m_env.get_param("async_tlb_flushing");
+        if (async_tlb_flushing &&
+            (strcmp(async_tlb_flushing, "true") == 0 ||
+             strcmp(async_tlb_flushing, "TRUE") == 0 ||
+             strcmp(async_tlb_flushing, "True") == 0))
+            m_async_tlb_flushing = true;
+        else
+            m_async_tlb_flushing = false;
     }
 
     core::~core() {
@@ -1117,17 +1127,28 @@ namespace ocx { namespace arm {
 
     void core::helper_tlb_cluster_flush(void* opaque) {
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH, nullptr);
+        if (cpu->m_async_tlb_flushing)
+            cpu->m_env.broadcast_syscall_async(TLB_FLUSH, nullptr, 0);
+        else
+            cpu->m_env.broadcast_syscall(TLB_FLUSH, nullptr);
     }
 
     void core::helper_tlb_cluster_flush_page(void* opaque, u64 addr) {
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE, (void*)addr);
+        if (cpu->m_async_tlb_flushing)
+            cpu->m_env.broadcast_syscall_async(TLB_FLUSH_PAGE, (void*)addr, 0);
+        else
+            cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE, (void*)addr);
     }
 
     void core::helper_tlb_cluster_flush_mmuidx(void* opaque, uint16_t idxmap) {
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH_MMUIDX, (void*)(uintptr_t)idxmap);
+        if (cpu->m_async_tlb_flushing)
+            cpu->m_env.broadcast_syscall_async(TLB_FLUSH_MMUIDX,
+                                               (void*)(uintptr_t)idxmap, 0);
+        else
+            cpu->m_env.broadcast_syscall(TLB_FLUSH_MMUIDX,
+                                         (void*)(uintptr_t)idxmap);
     }
 
     void core::helper_tlb_cluster_flush_page_mmuidx(void* opaque, u64 addr,
@@ -1137,7 +1158,10 @@ namespace ocx { namespace arm {
         ERROR_ON((uintptr_t)idxmap & ~PAGE_MASK, "high bits set in idxmap");
         uintptr_t arg = addr | (uintptr_t)idxmap;
         core* cpu = (core*)opaque;
-        cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE_MMUIDX, (void*)arg);
+        if (cpu->m_async_tlb_flushing)
+            cpu->m_env.broadcast_syscall_async(TLB_FLUSH_PAGE_MMUIDX, (void*)arg, 0);
+        else
+            cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE_MMUIDX, (void*)arg);
     }
 
     void core::helper_breakpoint(void* opaque, u64 addr) {
