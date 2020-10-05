@@ -1109,6 +1109,11 @@ namespace ocx { namespace arm {
         if (!prot || !*prot)
             return false;
 
+        if (*prot == -1) { // mmu is off
+            *dmiptr = cpu->m_env.get_page_ptr_w(page);
+            return *dmiptr != nullptr;
+        }
+
         if ((*prot & UC_PROT_READ)  && !(r = cpu->m_env.get_page_ptr_r(page)))
             return false;
         if ((*prot & UC_PROT_WRITE) && !(w = cpu->m_env.get_page_ptr_w(page)))
