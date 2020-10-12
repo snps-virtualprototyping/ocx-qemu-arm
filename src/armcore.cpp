@@ -257,8 +257,9 @@ namespace ocx { namespace arm {
         static void helper_time_irq(void* cpu, int idx, int set);
         static void helper_schedule(void* cpu, int idx, u64 clock, u64 ticks);
 
-        static bool helper_dmi(uc_engine* uc, void* arg, u64 page_addr,
-                               unsigned char** dmiptr, int* prot);
+        static bool helper_dmi(void* arg, u64 addr, unsigned char** dmiptr,
+                               int* prot);
+        static void helper_pgprot(void* arg, unsigned char* p, uint64_t addr);
 
         static uc_tx_result_t helper_transport(uc_engine* uc, void* cpu,
                                                uc_mmio_tx_t* tx);
@@ -314,7 +315,7 @@ namespace ocx { namespace arm {
         ERROR_ON(ret != UC_ERR_OK, "cannot map ports: %s", uc_strerror(ret));
 
         // setup callback for DMI
-        ret = uc_setup_dmi(m_uc, this, &helper_dmi);
+        ret = uc_setup_dmi(m_uc, this, &helper_dmi, &helper_pgprot);
         ERROR_ON(ret != UC_ERR_OK, "dmi failed: %s", uc_strerror(ret));
 
         // setup cluster callbacks
@@ -1093,14 +1094,12 @@ namespace ocx { namespace arm {
         return translate_response(resp);
     }
 
-    bool core::helper_dmi(uc_engine* uc, void* opaque, u64 page,
-                          unsigned char** dmiptr, int* prot) {
-        (void)uc;
+    bool core::helper_dmi(void* opaque, u64 page, unsigned char** dmiptr,
+                          int* prot) {
         core* cpu = (core*)opaque;
 
         u8* r = nullptr;
         u8* w = nullptr;
-        u8* x = nullptr;
 
         if (!prot || !*prot)
             return false;
@@ -1110,20 +1109,27 @@ namespace ocx { namespace arm {
             return *dmiptr != nullptr;
         }
 
-        if ((*prot & UC_PROT_READ)  && !(r = cpu->m_env.get_page_ptr_r(page)))
-            return false;
-        if ((*prot & UC_PROT_WRITE) && !(w = cpu->m_env.get_page_ptr_w(page)))
-            return false;
-        if ((*prot & UC_PROT_EXEC)  && !(x = cpu->m_env.get_page_ptr_x(page)))
-            return false;
+        if (*prot & (UC_PROT_READ | UC_PROT_EXEC)) {
+            if (!(r = cpu->m_env.get_page_ptr_r(page)))
+                return false;
+        }
+
+        if (*prot & UC_PROT_WRITE) {
+            if (!(w = cpu->m_env.get_page_ptr_w(page)))
+                return false;
+        }
+
 
         if (w && r && w != r)
             return false;
-        if (x && r && x != r)
-            return false;
 
-        *dmiptr = r ?: w ?: x;
+        *dmiptr = r ?: w;
         return true;
+    }
+
+    void core::helper_pgprot(void* opaque, unsigned char* ptr, uint64_t addr) {
+        core* cpu = (core*)opaque;
+        cpu->m_env.protect_page(ptr, addr);
     }
 
     void core::helper_tlb_cluster_flush(void* opaque) {
