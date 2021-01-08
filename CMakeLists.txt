@@ -52,7 +52,7 @@ add_library(ocx-qemu-arm MODULE ${sources})
 
 if (MSVC)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/unicorn.a
+    set(UNICORN_LIB ${UNICORN_HOME}/prebuilt/libunicorn.a
                     ${UNICORN_HOME}/prebuilt/libgcc.a
                     ${UNICORN_HOME}/prebuilt/libmingw32.a
                     ${UNICORN_HOME}/prebuilt/libmingwex.a)

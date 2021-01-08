@@ -1123,7 +1123,7 @@ namespace ocx { namespace arm {
         if (w && r && w != r)
             return false;
 
-        *dmiptr = r ?: w;
+        *dmiptr = r ? r : w;
         return true;
     }
 
