@@ -1027,9 +1027,18 @@ namespace ocx { namespace arm {
 
     inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, u64* result_high) {
 #ifdef _MSC_VER
+#  if _MSC_VER < 1920
+        double q = (double)mult2 / (double)quot;
+        double r = (double)mult1 * q;
+        if (r > (double)UINT64_MAX)
+            *result_high = (u64)-1;
+
+        return (u64)r;            
+#  else
         u64 prod, prod_high;
         prod = _umul128(mult1, mult2, &prod_high);
-        return _udiv128(prod, prod_high, quot, result_high);
+        return _udiv128(prod_high, prod, quot, result_high);
+#  endif
 #else
         typedef unsigned __int128 u128;
         u128 result = (u128)mult1 * (u128)mult2 / quot;
@@ -1063,7 +1072,7 @@ namespace ocx { namespace arm {
         }
 
         u64 time_ps, time_ps_high;
-        time_ps = mult_div_128(ticks, PS_PER_SEC, clock, &time_ps_high);
+        time_ps = mult_div_128(ticks, clock, PS_PER_SEC, &time_ps_high);
         if (time_ps_high != 0)
             time_ps = UINT64_MAX;
         cpu->m_env.notify(idx, time_ps);
