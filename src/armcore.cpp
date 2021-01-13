@@ -1072,7 +1072,7 @@ namespace ocx { namespace arm {
         }
 
         u64 time_ps, time_ps_high;
-        time_ps = mult_div_128(ticks, clock, PS_PER_SEC, &time_ps_high);
+        time_ps = mult_div_128(ticks, PS_PER_SEC, clock, &time_ps_high);
         if (time_ps_high != 0)
             time_ps = UINT64_MAX;
         cpu->m_env.notify(idx, time_ps);
