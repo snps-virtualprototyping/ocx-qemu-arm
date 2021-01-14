@@ -33,6 +33,7 @@
 #include <io.h>
 #include <intrin.h>
 #include <immintrin.h>
+#include <xmmintrin.h>
 #  ifdef ERROR
 #    undef ERROR
 #  endif
@@ -1025,33 +1026,37 @@ namespace ocx { namespace arm {
         return ~0ull;
     }
 
-    inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, u64* result_high) {
 #ifdef _MSC_VER
-#  if _MSC_VER < 1920
-        double q = (double)mult2 / (double)quot;
-        double r = (double)mult1 * q;
-        if (r > (double)UINT64_MAX)
-            *result_high = (u64)-1;
+    // MSVC does not support 128bit integral types, and the _udiv128 intrinsic
+    // is either not present or does not work but we are linking against the
+    // mingw libgcc.a lib anyway so we can use __udivti3 from there
 
-        return (u64)r;            
-#  else
-        u64 prod, prod_high;
-        prod = _umul128(mult1, mult2, &prod_high);
-        return _udiv128(prod_high, prod, quot, result_high);
-#  endif
+    extern "C" __m128 __udivti3(__m128* dividend, __m128* divisor);
+
+    inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, bool& overflow) {
+        __m128 p, q;
+        p.m128_u64[0] = _umul128(mult1, mult2, &p.m128_u64[1]);
+        q.m128_u64[0] = quot;
+        q.m128_u64[1] = 0;
+        __m128 r = __udivti3(&p, &q);
+        overflow = (bool)r.m128_u64[1];
+        return r.m128_u64[0];
+    }
 #else
+    inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, bool& overflow) {
         typedef unsigned __int128 u128;
         u128 result = (u128)mult1 * (u128)mult2 / quot;
-        *result_high = (u64)(result >> 64);
+        overflow = (bool)(u64)(result >> 64);
         return (u64)result;
-#endif
     }
+#endif
 
     uint64_t core::helper_time(void* opaque, u64 clock) {
         core* cpu = (core*)opaque;
-        u64 ticks, ticks_high;
-        ticks = mult_div_128(cpu->m_env.get_time_ps(), clock, PS_PER_SEC, &ticks_high);
-        ERROR_ON(ticks_high != 0, "ticks out of bounds");
+        u64 ticks;
+        bool overflow;
+        ticks = mult_div_128(cpu->m_env.get_time_ps(), clock, PS_PER_SEC, overflow);
+        ERROR_ON(overflow, "ticks out of bounds");
         return ticks;
     }
 
@@ -1066,14 +1071,19 @@ namespace ocx { namespace arm {
 
         core* cpu = (core*)opaque;
 
-        if (ticks == ~0ull) {
+        if (ticks == UINT64_MAX) {
             cpu->m_env.cancel(idx);
             return;
         }
 
-        u64 time_ps, time_ps_high;
-        time_ps = mult_div_128(ticks, PS_PER_SEC, clock, &time_ps_high);
-        if (time_ps_high != 0)
+        if (ticks == (u64)INT64_MAX) {
+            cpu->m_env.notify(idx, UINT64_MAX);
+            return;
+        }
+
+        bool overflow;
+        u64 time_ps = mult_div_128(ticks, PS_PER_SEC, clock, overflow);
+        if (overflow)
             time_ps = UINT64_MAX;
         cpu->m_env.notify(idx, time_ps);
     }
