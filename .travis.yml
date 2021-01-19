@@ -1,7 +1,9 @@
 dist: trusty
-os:  linux
+os: linux
 
 language: cpp
+
+python: "3.5"
 
 compiler:
   - gcc
