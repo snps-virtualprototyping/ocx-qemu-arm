@@ -3,8 +3,6 @@ os: linux
 
 language: cpp
 
-python: "3.5"
-
 compiler:
   - gcc
 
@@ -24,6 +22,9 @@ script:
   - make && ctest --output-on-failure
 
 addons:
+  apt:
+    packages:
+      - python3.8
   coverity_scan:
     project:
       name: "snps-virtualprototyping/ocx-qemu-arm"
