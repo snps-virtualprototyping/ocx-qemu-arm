@@ -46,7 +46,7 @@
 #  define STDIN_FILENO  0
 #  define STDOUT_FILENO 1
 #  define STDERR_FILENO 2
-#  pragma warning(disable: 4505 4996)
+#  pragma warning(disable: 4505 4800 4996)
 #else
 #  pragma GCC diagnostic ignored "-Wformat"
 #endif
