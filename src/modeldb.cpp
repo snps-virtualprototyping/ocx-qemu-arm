@@ -406,6 +406,7 @@ namespace ocx { namespace arm {
         { UC_ARM_REG_NOIMP,         0, 32, "DBGDTRRX"      },
         { UC_ARM_REG_NOIMP,         0, 32, "DBGDTRTX"      },
         { UC_ARM_REG_MPIDR,         0, 32, "MPIDR"         },
+        { UC_ARM_REG_VECTADDR,      0, 32, "VECTADDR"      },
 
         /* aarch32 floating point registers */
         { UC_ARM_REG_D0,   0, 64, "D0"  },
