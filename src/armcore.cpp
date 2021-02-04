@@ -375,7 +375,10 @@ namespace ocx { namespace arm {
     }
 
     const char* core::provider() {
-        return "qemu/unicorn/yuzu - " __DATE__;
+        static char buf[256] = {};
+        if (strlen(buf) == 0)
+            snprintf(buf, sizeof(buf), "qemu/unicorn/yuzu - %s", uc_gitrev());
+        return buf;
     }
 
     const char* core::arch() {
