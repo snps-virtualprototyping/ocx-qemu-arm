@@ -512,13 +512,18 @@ namespace ocx { namespace arm {
         ERROR_ON(idx >= num_regs(), "register index %llu out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
-        const u64 mask = gen_mask(r.width);
         const u64 size = reg_size(idx);
+
+        if (size > sizeof(u64)) {
+            ERROR_ON(r.offset, "cannot handle offsets with vector registers");
+            return uc_reg_read(m_uc, r.id, buf) == UC_ERR_OK;
+        }
 
         u64 buffer = 0;
         if (uc_reg_read(m_uc, r.id, &buffer) != UC_ERR_OK)
             return false;
 
+        const u64 mask = gen_mask(r.width);
         buffer = (buffer >> r.offset) & mask;
         memcpy(buf, &buffer, size);
 
@@ -529,13 +534,18 @@ namespace ocx { namespace arm {
         ERROR_ON(idx >= num_regs(), "register index %llu out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
-        const u64 mask = gen_mask(r.width);
         const u64 size = reg_size(idx);
+
+        if (size > sizeof(u64)) {
+            ERROR_ON(r.offset, "cannot handle offsets with vector registers");
+            return uc_reg_write(m_uc, r.id, buf) == UC_ERR_OK;
+        }
 
         u64 oldval = 0ull;
         if (uc_reg_read(m_uc, r.id, &oldval) != UC_ERR_OK)
             return false;
 
+        const u64 mask = gen_mask(r.width);
         u64 newval = 0ull;
         memcpy(&newval, buf, size);
         newval  = (newval & mask) << r.offset;
