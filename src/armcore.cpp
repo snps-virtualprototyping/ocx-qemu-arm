@@ -126,33 +126,6 @@ namespace ocx { namespace arm {
         }
     }
 
-    enum semihosting_call {
-        SHC_OPEN    = 0x01,
-        SHC_CLOSE   = 0x02,
-        SHC_WRITEC  = 0x03,
-        SHC_WRITE0  = 0x04,
-        SHC_WRITE   = 0x05,
-        SHC_READ    = 0x06,
-        SHC_READC   = 0x07,
-        SHC_ISERR   = 0x08,
-        SHC_ISTTY   = 0x09,
-        SHC_SEEK    = 0x0a,
-        SHC_FLEN    = 0x0c,
-        SHC_TMPNAM  = 0x0d,
-        SHC_REMOVE  = 0x0e,
-        SHC_RENAME  = 0x0f,
-        SHC_CLOCK   = 0x10,
-        SHC_TIME    = 0x11,
-        SHC_SYSTEM  = 0x12,
-        SHC_ERRNO   = 0x13,
-        SHC_CMDLINE = 0x15,
-        SHC_HEAP    = 0x16,
-        SHC_EXIT    = 0x18,
-        SHC_EXIT2   = 0x20,
-        SHC_ELAPSED = 0x30,
-        SHC_TICKFQ  = 0x31,
-    };
-
     enum syscallno {
         TLB_FLUSH               = 0x01,
         TLB_FLUSH_PAGE          = 0x02,
@@ -229,9 +202,6 @@ namespace ocx { namespace arm {
         uc_engine*   m_uc;
         env&         m_env;
         const model* m_model;
-        csh          m_cap_aarch64;
-        csh          m_cap_aarch32;
-        csh          m_cap_thumb;
         u64          m_num_insn;
         u64          m_start_time_ms;
         u64          m_procid;
@@ -241,17 +211,11 @@ namespace ocx { namespace arm {
         bool is_aarch32() const;
         bool is_thumb()   const;
 
-        csh lookup_disassembler() const;
         u64 get_program_counter() const;
 
         size_t read_mem_virt(u64 addr, void* buf, size_t bufsz);
         size_t write_mem_virt(u64 addr, const void* buf, size_t bufsz);
         size_t access_mem_phys(u64 addr, u8* buf, size_t bufsz, bool iswr);
-        string semihosting_read_string(u64 addr, size_t n);
-
-        u64 semihosting_get_reg(unsigned int no);
-        u64 semihosting_read_field(int n);
-        u64 semihosting(u32 call);
 
         // unicorn callbacks
         static uint64_t helper_time(void* cpu, u64 clock);
@@ -286,6 +250,65 @@ namespace ocx { namespace arm {
             u64 addr;
             uint16_t idxmap;
         };
+
+        class disassembler {
+        public:
+            disassembler(core& parent);
+            ~disassembler();
+            u64 disassemble(u64 addr, char* buf, size_t bufsz);
+            
+        private:
+            csh lookup_disassembler() const;
+
+        private:
+            core& m_core;
+            csh   m_cap_aarch64;
+            csh   m_cap_aarch32;
+            csh   m_cap_thumb;
+        } m_disassembler;
+
+        class semihosting {
+        public:
+            semihosting(core& parent) : m_core(parent) {}
+            u64 execute(u32 call);
+
+        private:
+            enum semihosting_call {
+                SHC_OPEN    = 0x01,
+                SHC_CLOSE   = 0x02,
+                SHC_WRITEC  = 0x03,
+                SHC_WRITE0  = 0x04,
+                SHC_WRITE   = 0x05,
+                SHC_READ    = 0x06,
+                SHC_READC   = 0x07,
+                SHC_ISERR   = 0x08,
+                SHC_ISTTY   = 0x09,
+                SHC_SEEK    = 0x0a,
+                SHC_FLEN    = 0x0c,
+                SHC_TMPNAM  = 0x0d,
+                SHC_REMOVE  = 0x0e,
+                SHC_RENAME  = 0x0f,
+                SHC_CLOCK   = 0x10,
+                SHC_TIME    = 0x11,
+                SHC_SYSTEM  = 0x12,
+                SHC_ERRNO   = 0x13,
+                SHC_CMDLINE = 0x15,
+                SHC_HEAP    = 0x16,
+                SHC_EXIT    = 0x18,
+                SHC_EXIT2   = 0x20,
+                SHC_ELAPSED = 0x30,
+                SHC_TICKFQ  = 0x31,
+            };
+
+            string rd_string(u64 addr, size_t n);
+            u64    rd_reg(unsigned int no);
+            u64    rd_field(int n);
+
+            static int modeflags(int mode);
+
+        private:
+            core& m_core;
+        } m_semihosting;
     };
 
     core::core(env &env, const model* modl) :
@@ -293,13 +316,12 @@ namespace ocx { namespace arm {
         m_uc(),
         m_env(env),
         m_model(modl),
-        m_cap_aarch64(),
-        m_cap_aarch32(),
-        m_cap_thumb(),
         m_num_insn(0),
         m_start_time_ms(realtime_ms()),
         m_procid(0),
-        m_coreid(0) {
+        m_coreid(0),
+        m_disassembler(*this),
+        m_semihosting(*this) {
         uc_err ret = uc_open(m_model->name, this, &helper_config, &m_uc);
         ERROR_ON(ret != UC_ERR_OK, "unicorn error: %s", uc_strerror(ret));
 
@@ -336,26 +358,6 @@ namespace ocx { namespace arm {
 
         // setup semihosting callback
         uc_setup_semihosting(m_uc, this, &helper_semihosting);
-
-        // setup disassemblers
-        if (modl->has_aarch64()) {
-            cs_arch arch = CS_ARCH_ARM64;
-            cs_mode mode = CS_MODE_LITTLE_ENDIAN;
-            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch64);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
-        }
-
-        if (modl->has_aarch32()) {
-            cs_arch arch = CS_ARCH_ARM;
-            cs_mode mode = CS_MODE_LITTLE_ENDIAN;
-            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch32);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
-
-            arch = CS_ARCH_ARM;
-            mode = CS_MODE_THUMB;
-            cs_ret = cs_open(arch, mode, &m_cap_thumb);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
-        }
     }
 
     core::~core() {
@@ -363,15 +365,6 @@ namespace ocx { namespace arm {
             uc_close(m_uc);
             m_uc = nullptr;
         }
-
-        if (m_cap_aarch64)
-            cs_close(&m_cap_aarch64);
-
-        if (m_cap_aarch32)
-            cs_close(&m_cap_aarch32);
-
-        if (m_cap_thumb)
-            cs_close(&m_cap_thumb);
     }
 
     const char* core::provider() {
@@ -620,31 +613,7 @@ namespace ocx { namespace arm {
     }
 
     u64 core::disassemble(u64 addr, char* buf, size_t bufsz) {
-        ERROR_ON(bufsz == 0, "unexpected zero bufsz");
-
-        u32 insn = 0;
-        u64 size = read_mem_virt(addr, &insn, 4);
-
-        if (!is_thumb() && size != 4)
-            return 0;
-
-        if (is_thumb() && size != 2 && size != 4)
-            return 0;
-
-        cs_insn* sym;
-        csh disas = lookup_disassembler();
-        ERROR_ON(!disas, "no disassembler available");
-
-        if (cs_disasm(disas, (const u8*)&insn, size, 0, 1, &sym)) {
-            snprintf(buf, bufsz, "%s %s", sym->mnemonic, sym->op_str);
-            u64 len = sym->size;
-            cs_free(sym, 1);
-            return len;
-        }
-
-        // show as data, resize is until next aligned address
-        snprintf(buf, bufsz, ".data");
-        return ((addr + size) & ~(size - 1)) - addr;
+        return m_disassembler.disassemble(addr, buf, bufsz);
     }
 
     void core::invalidate_page_ptrs() {
@@ -689,16 +658,6 @@ namespace ocx { namespace arm {
         if (uc_reg_read(m_uc, UC_ARM_VREG_THUMB, &state) != UC_ERR_OK)
             ERROR("failed to read program state");
         return state;
-    }
-
-    csh core::lookup_disassembler() const {
-        if (is_thumb())
-            return m_cap_thumb;
-        if (is_aarch32())
-            return m_cap_aarch32;
-        if (is_aarch64())
-            return m_cap_aarch64;
-        return 0;
     }
 
     u64 core::get_program_counter() const {
@@ -798,251 +757,10 @@ namespace ocx { namespace arm {
          return bytes_written;
     }
 
-    string core::semihosting_read_string(u64 addr, size_t n) {
-        string result;
-        char buffer = ~0;
-        while (n-- && buffer != '\0') {
-            if (read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
-                ERROR("failed to read char at 0x%016llx", addr - 1);
-            result += buffer;
-        }
-
-        return result;
-    }
-
-    u64 core::semihosting_get_reg(unsigned int no) {
-        ERROR_ON(no > 1, "unexpected semihost reg read %u", no);
-        u64 val = ~0ull;
-        no = (is_aarch64() ? (int)UC_ARM64_REG_X0 : (int)UC_ARM_REG_R0) + no;
-        uc_err r = uc_reg_read(m_uc, no, &val);
-        ERROR_ON(r != UC_ERR_OK, "failed to read reg %u", no);
-        return val;
-    }
-
-    u64 core::semihosting_read_field(int n) {
-        const u64 size = is_aarch64() ? sizeof(u64) : sizeof(u32);
-        u64 addr = semihosting_get_reg(1) + n * size;
-        u64 field = 0;
-
-        if (read_mem_virt(addr, (unsigned char*)&field, size) != size)
-            ERROR("failed to read address 0x%016llx", addr);
-
-        return field;
-    }
-
-    static int modeflags(int mode) {
-        // bit 0 of mode stores "b" info, which is not needed for open
-        switch (mode >> 1) {
-        case 0: return O_RDONLY; // "r" and "rb"
-        case 1: return O_RDWR;   // "r+" and "r+b"
-        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
-        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
-        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
-        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
-        default:
-            ERROR("illegal open mode %d", mode);
-        }
-    }
-
-    u64 core::semihosting(u32 call) {
-        switch (call) {
-        case SHC_CLOCK:
-            return (realtime_ms() - m_start_time_ms) / 10;
-
-        case SHC_TIME:
-            return time(NULL);
-
-        case SHC_ELAPSED:
-            return m_num_insn + uc_instruction_count(m_uc);
-
-        case SHC_TICKFQ:
-            return CLOCKS_PER_SEC;
-
-        case SHC_EXIT:
-            INFO("arm semihosting: software exit request");
-            exit((int)semihosting_get_reg(1));
-
-        case SHC_EXIT2:
-            INFO("arm semihosting: software exit request");
-            exit((int)(semihosting_get_reg(1) >> 32));
-
-        case SHC_READC:
-            return getchar();
-
-        case SHC_ERRNO:
-            return errno;
-
-        case SHC_WRITEC: {
-            unsigned char c;
-            u64 addr = semihosting_get_reg(1);
-            if (read_mem_virt(addr, &c, sizeof(c)) != sizeof(c))
-                return ~0ull;
-            putchar(c);
-            return c;
-        }
-
-        case SHC_WRITE0: {
-            unsigned char c;
-            u64 addr = semihosting_get_reg(1);
-            do {
-                if (read_mem_virt(addr++, &c, sizeof(c)) != sizeof(c))
-                    break;
-                if (c != '\0')
-                    putchar(c);
-            } while (c != '\0');
-            return addr;
-        }
-
-        case SHC_OPEN: {
-            u64 addr = semihosting_read_field(0);
-            u64 mode = semihosting_read_field(1);
-            u64 size = semihosting_read_field(2);
-
-            string file = semihosting_read_string(addr, size);
-
-            if (file == ":tt") {
-                return (mode < 4) ? STDIN_FILENO :
-                       (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
-            }
-
-            return open(file.c_str(), modeflags((int)mode));
-        }
-
-        case SHC_CLOSE: {
-            u64 file = semihosting_read_field(0);
-            close((int)file);
-            return 0;
-        }
-
-        case SHC_WRITE: {
-            u64 file = semihosting_read_field(0);
-            u64 addr = semihosting_read_field(1);
-            u64 size = semihosting_read_field(2);
-
-            while (size > 0) {
-                unsigned char buffer = 0;
-                if (read_mem_virt(addr, &buffer, 1) != 1)
-                    return size;
-
-                if (write((int)file, &buffer, 1) != 1)
-                    return size;
-
-                size--;
-                addr++;
-            }
-
-            return 0;
-        }
-
-        case SHC_ISTTY: {
-            u64 file = semihosting_read_field(0);
-            return isatty((int)file);
-        }
-
-        case SHC_FLEN: {
-            int fd = (int)semihosting_read_field(0);
-            off_t curr = lseek(fd, 0, SEEK_CUR);
-            if (curr == -1) return (u64)-1;
-            off_t size = lseek(fd, 0, SEEK_END);
-            if (size == -1) return (u64)-1;
-            off_t res = lseek(fd, curr, SEEK_SET);
-            if (res == -1) return (u64)-1;
-            return size;
-        }
-
-        case SHC_READ: {
-            u64 file = semihosting_read_field(0);
-            u64 addr = semihosting_read_field(1);
-            u64 size = semihosting_read_field(2);
-
-            u8 buffer[4096];
-            size_t bytes_read = 0;
-            size_t bytes_todo = size;
-
-            while (bytes_todo > 0) {
-                size_t sz = bytes_todo;
-                if (sz > sizeof(buffer))
-                    sz = sizeof(buffer);
-
-                ssize_t n = read((int)file, buffer, (unsigned int)sz);
-                if (n < 0) {
-                    INFO("arm semihosting read failure %s", strerror(errno));
-                    return bytes_todo;
-                }
-
-                if (n == 0)
-                    return bytes_todo;
-
-                if (write_mem_virt(addr + bytes_read, buffer, n) != (size_t)n) {
-                    INFO("arm semihosting store failure");
-                    return bytes_todo;
-                }
-
-                bytes_read += n;
-                bytes_todo -= n;
-            }
-
-            return bytes_todo;
-        }
-
-        case SHC_SEEK: {
-            u64 file = semihosting_read_field(0);
-            u64 offset = semihosting_read_field(1);
-            if (lseek((int)file, (long)offset, SEEK_SET) != (off_t)offset)
-                return (u64)-1;
-            return 0;
-        }
-
-        case SHC_ISERR: {
-            u64 status = semihosting_read_field(0);
-            return status ? (u64)-1  : 0; // assume 0 means "success"
-        }
-
-        case SHC_CMDLINE: {
-            u64 addr = semihosting_read_field(0);
-            u64 size = semihosting_read_field(1);
-
-            const char* cmdline_str = m_env.get_param("command_line");
-            if (!cmdline_str)
-                return (u64)-1;
-
-            string cmdline(cmdline_str);
-            if (cmdline.empty())
-                return (u64)-1;
-
-            size_t length = cmdline.length();
-            if (length >= size)
-                length = size - 1;
-
-            u8 zero = 0;
-            const char* data = cmdline.c_str();
-
-            if (write_mem_virt(addr, data, length) != length)
-                return (u64)-1;
-
-            if (write_mem_virt(addr + length, &zero, 1) != 1)
-                return (u64)-1;
-
-            return 0;
-        }
-
-        case SHC_TMPNAM:
-        case SHC_REMOVE:
-        case SHC_RENAME:
-        case SHC_SYSTEM:
-        case SHC_HEAP:
-        default:
-            INFO("arm semihosting: unsupported call %x", call);
-            break;
-        }
-
-        return ~0ull;
-    }
-
 #ifdef _MSC_VER
     // MSVC does not support 128bit integral types, and the _udiv128 intrinsic
-    // is either not present or does not work but we are linking against the
-    // mingw libgcc.a lib anyway so we can use __udivti3 from there
+    // is not what we need, but we link with the mingw libgcc.a lib anyway so we
+    // use __udivti3 from there
 
     extern "C" __m128 __udivti3(__m128* dividend, __m128* divisor);
 
@@ -1063,6 +781,10 @@ namespace ocx { namespace arm {
         return (u64)result;
     }
 #endif
+
+    //
+    // unicorn helper callbacks
+    //
 
     uint64_t core::helper_time(void* opaque, u64 clock) {
         core* cpu = (core*)opaque;
@@ -1150,7 +872,6 @@ namespace ocx { namespace arm {
             if (!(w = cpu->m_env.get_page_ptr_w(page)))
                 return false;
         }
-
 
         if (w && r && w != r)
             return false;
@@ -1247,7 +968,7 @@ namespace ocx { namespace arm {
 
     u64 core::helper_semihosting(void* opaque, u32 call) {
         core* cpu = (core*)opaque;
-        return cpu->semihosting(call);
+        return cpu->m_semihosting.execute(call);
     }
 
     const char* core::helper_config(void* opaque, const char* config) {
@@ -1255,7 +976,336 @@ namespace ocx { namespace arm {
         return cpu->m_env.get_param(config);
     }
 
+    //
+    // ARM disassembler
+    //
+
+    core::disassembler::disassembler(core& parent)
+    : m_core(parent),
+      m_cap_aarch64(),
+      m_cap_aarch32(),
+      m_cap_thumb()
+    {
+        if (m_core.m_model->has_aarch64()) {
+            cs_arch arch = CS_ARCH_ARM64;
+            cs_mode mode = CS_MODE_LITTLE_ENDIAN;
+            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch64);
+            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
+        }
+
+        if (m_core.m_model->has_aarch32()) {
+            cs_arch arch = CS_ARCH_ARM;
+            cs_mode mode = CS_MODE_LITTLE_ENDIAN;
+            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch32);
+            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
+
+            arch = CS_ARCH_ARM;
+            mode = CS_MODE_THUMB;
+            cs_ret = cs_open(arch, mode, &m_cap_thumb);
+            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
+        }
+    }
+
+    csh core::disassembler::lookup_disassembler() const {
+        if (m_core.is_thumb())
+            return m_cap_thumb;
+        if (m_core.is_aarch32())
+            return m_cap_aarch32;
+        if (m_core.is_aarch64())
+            return m_cap_aarch64;
+        return 0;
+    }
+
+    u64 core::disassembler::disassemble(u64 addr, char* buf, size_t bufsz) {
+        ERROR_ON(bufsz == 0, "unexpected zero bufsz");
+
+        u32 insn = 0;
+        u64 size = m_core.read_mem_virt(addr, &insn, 4);
+
+        if (!m_core.is_thumb() && size != 4)
+            return 0;
+
+        if (m_core.is_thumb() && size != 2 && size != 4)
+            return 0;
+
+        cs_insn* sym;
+        csh disas = lookup_disassembler();
+        ERROR_ON(!disas, "no disassembler available");
+
+        if (cs_disasm(disas, (const u8*)&insn, size, 0, 1, &sym)) {
+            snprintf(buf, bufsz, "%s %s", sym->mnemonic, sym->op_str);
+            u64 len = sym->size;
+            cs_free(sym, 1);
+            return len;
+        }
+
+        // show as data, resize is until next aligned address
+        snprintf(buf, bufsz, ".data");
+        return ((addr + size) & ~(size - 1)) - addr;
+    }
+
+    core::disassembler::~disassembler() {
+        if (m_cap_aarch64)
+            cs_close(&m_cap_aarch64);
+
+        if (m_cap_aarch32)
+            cs_close(&m_cap_aarch32);
+
+        if (m_cap_thumb)
+            cs_close(&m_cap_thumb);
+    }
+
+    //
+    // ARM semihosting implementation
+    //
+
+    string core::semihosting::rd_string(u64 addr, size_t n) {
+        string result;
+        char buffer = ~0;
+        while (n-- && buffer != '\0') {
+            if (m_core.read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
+                ERROR("failed to read char at 0x%016llx", addr - 1);
+            result += buffer;
+        }
+
+        return result;
+    }
+
+    u64 core::semihosting::rd_reg(unsigned int no) {
+        ERROR_ON(no > 1, "unexpected semihost reg read %u", no);
+        u64 val = ~0ull;
+        no += (m_core.is_aarch64() ? (int)UC_ARM64_REG_X0 : (int)UC_ARM_REG_R0);
+        uc_err r = uc_reg_read(m_core.m_uc, no, &val);
+        ERROR_ON(r != UC_ERR_OK, "failed to read reg %u", no);
+        return val;
+    }
+
+    u64 core::semihosting::rd_field(int n) {
+        const u64 size = m_core.is_aarch64() ? sizeof(u64) : sizeof(u32);
+        u64 addr = rd_reg(1) + n * size;
+        u64 field = 0;
+
+        if (m_core.read_mem_virt(addr, (unsigned char*)&field, size) != size)
+            ERROR("failed to read address 0x%016llx", addr);
+
+        return field;
+    }
+
+    int core::semihosting::modeflags(int mode) {
+        // bit 0 of mode stores "b" info, which is not needed for open
+        switch (mode >> 1) {
+        case 0: return O_RDONLY; // "r" and "rb"
+        case 1: return O_RDWR;   // "r+" and "r+b"
+        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
+        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
+        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
+        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
+        default:
+            ERROR("illegal open mode %d", mode);
+        }
+    }
+
+    u64 core::semihosting::execute(u32 call) {
+        switch (call) {
+        case SHC_CLOCK:
+            return (realtime_ms() - m_core.m_start_time_ms) / 10;
+
+        case SHC_TIME:
+            return time(NULL);
+
+        case SHC_ELAPSED:
+            return m_core.m_num_insn + uc_instruction_count(m_core.m_uc);
+
+        case SHC_TICKFQ:
+            return CLOCKS_PER_SEC;
+
+        case SHC_EXIT:
+            INFO("arm semihosting: software exit request");
+            exit((int)rd_reg(1));
+
+        case SHC_EXIT2:
+            INFO("arm semihosting: software exit request");
+            exit((int)(rd_reg(1) >> 32));
+
+        case SHC_READC:
+            return getchar();
+
+        case SHC_ERRNO:
+            return errno;
+
+        case SHC_WRITEC: {
+            unsigned char c;
+            u64 addr = rd_reg(1);
+            if (m_core.read_mem_virt(addr, &c, sizeof(c)) != sizeof(c))
+                return ~0ull;
+            putchar(c);
+            return c;
+        }
+
+        case SHC_WRITE0: {
+            unsigned char c;
+            u64 addr = rd_reg(1);
+            do {
+                if (m_core.read_mem_virt(addr++, &c, sizeof(c)) != sizeof(c))
+                    break;
+                if (c != '\0')
+                    putchar(c);
+            } while (c != '\0');
+            return addr;
+        }
+
+        case SHC_OPEN: {
+            u64 addr = rd_field(0);
+            u64 mode = rd_field(1);
+            u64 size = rd_field(2);
+
+            string file = rd_string(addr, size);
+
+            if (file == ":tt") {
+                return (mode < 4) ? STDIN_FILENO :
+                       (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
+            }
+
+            return open(file.c_str(), modeflags((int)mode));
+        }
+
+        case SHC_CLOSE: {
+            u64 file = rd_field(0);
+            close((int)file);
+            return 0;
+        }
+
+        case SHC_WRITE: {
+            u64 file = rd_field(0);
+            u64 addr = rd_field(1);
+            u64 size = rd_field(2);
+
+            while (size > 0) {
+                unsigned char buffer = 0;
+                if (m_core.read_mem_virt(addr, &buffer, 1) != 1)
+                    return size;
+
+                if (write((int)file, &buffer, 1) != 1)
+                    return size;
+
+                size--;
+                addr++;
+            }
+
+            return 0;
+        }
+
+        case SHC_ISTTY: {
+            u64 file = rd_field(0);
+            return isatty((int)file);
+        }
+
+        case SHC_FLEN: {
+            int fd = (int)rd_field(0);
+            off_t curr = lseek(fd, 0, SEEK_CUR);
+            if (curr == -1) return (u64)-1;
+            off_t size = lseek(fd, 0, SEEK_END);
+            if (size == -1) return (u64)-1;
+            off_t res = lseek(fd, curr, SEEK_SET);
+            if (res == -1) return (u64)-1;
+            return size;
+        }
+
+        case SHC_READ: {
+            u64 file = rd_field(0);
+            u64 addr = rd_field(1);
+            u64 size = rd_field(2);
+
+            u8 buffer[4096];
+            size_t bytes_read = 0;
+            size_t bytes_todo = size;
+
+            while (bytes_todo > 0) {
+                size_t sz = bytes_todo;
+                if (sz > sizeof(buffer))
+                    sz = sizeof(buffer);
+
+                ssize_t n = read((int)file, buffer, (unsigned int)sz);
+                if (n < 0) {
+                    INFO("arm semihosting read failure %s", strerror(errno));
+                    return bytes_todo;
+                }
+
+                if (n == 0)
+                    return bytes_todo;
+
+                if (m_core.write_mem_virt(addr + bytes_read, buffer, n) != 
+                    (size_t)n) {
+                    INFO("arm semihosting store failure");
+                    return bytes_todo;
+                }
+
+                bytes_read += n;
+                bytes_todo -= n;
+            }
+
+            return bytes_todo;
+        }
+
+        case SHC_SEEK: {
+            u64 file = rd_field(0);
+            u64 offset = rd_field(1);
+            if (lseek((int)file, (long)offset, SEEK_SET) != (off_t)offset)
+                return (u64)-1;
+            return 0;
+        }
+
+        case SHC_ISERR: {
+            u64 status = rd_field(0);
+            return status ? (u64)-1  : 0; // assume 0 means "success"
+        }
+
+        case SHC_CMDLINE: {
+            u64 addr = rd_field(0);
+            u64 size = rd_field(1);
+
+            const char* cmdline_str = m_core.m_env.get_param("command_line");
+            if (!cmdline_str)
+                return (u64)-1;
+
+            string cmdline(cmdline_str);
+            if (cmdline.empty())
+                return (u64)-1;
+
+            size_t length = cmdline.length();
+            if (length >= size)
+                length = size - 1;
+
+            u8 zero = 0;
+            const char* data = cmdline.c_str();
+
+            if (m_core.write_mem_virt(addr, data, length) != length)
+                return (u64)-1;
+
+            if (m_core.write_mem_virt(addr + length, &zero, 1) != 1)
+                return (u64)-1;
+
+            return 0;
+        }
+
+        case SHC_TMPNAM:
+        case SHC_REMOVE:
+        case SHC_RENAME:
+        case SHC_SYSTEM:
+        case SHC_HEAP:
+        default:
+            INFO("arm semihosting: unsupported call %x", call);
+            break;
+        }
+
+        return ~0ull;
+    }
+
     } // namespace arm
+
+    //
+    // ocx factory methods
+    //
 
     core* create_instance(u64 api_version, env& e, const char* variant) {
         if (api_version != OCX_API_VERSION) {
@@ -1278,6 +1328,5 @@ namespace ocx { namespace arm {
         ERROR_ON(cpu == nullptr, "calling delete_instance with foreign core");
         delete cpu;
     }
-
 }
 
