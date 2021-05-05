@@ -1267,7 +1267,7 @@ namespace ocx { namespace arm {
     core* create_instance(u64 api_version, env& e, const char* variant) {
         if (api_version != OCX_API_VERSION) {
             INFO("OCX_API_VERSION mismatch: requested %" PRIu64 " - "
-                 "expected %" PRIu64, api_version, OCX_API_VERSION);
+                 "expected %llu", api_version, OCX_API_VERSION);
             return nullptr;
         }
 
