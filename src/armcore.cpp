@@ -4,81 +4,32 @@
  * LICENSE file in the root directory of this source tree.
  ******************************************************************************/
 
-#define OCX_DLL_EXPORT
-
-#include <ocx/ocx.h>
-
-#include <unicorn/arm64.h>
-#include <unicorn/unicorn.h>
-#include <capstone/capstone.h>
+#include "armcore.h"
+#include "common.h"
 
 #include <algorithm>
 #include <chrono>
-#include <string>
-#include <vector>
-#include <memory>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime>
 #include <cerrno>
 #include <utility>
 #include <time.h>
 #include <fcntl.h>
 
-#include "modeldb.h"
-
 #ifdef _MSC_VER
-#include <io.h>
 #include <intrin.h>
 #include <immintrin.h>
 #include <xmmintrin.h>
-#  ifdef ERROR
-#    undef ERROR
-#  endif
-#  ifdef min
-#    undef min
-#  endif
-#  ifdef max
-#    undef max
-#  endif
-#  define STDIN_FILENO  0
-#  define STDOUT_FILENO 1
-#  define STDERR_FILENO 2
-#  pragma warning(disable: 4505 4800 4996)
 #else
 #  pragma GCC diagnostic ignored "-Wformat"
 #endif
 
-#define INFO(...)                                                             \
-    do {                                                                      \
-        fprintf(stderr, "%s:%d ", __FILE__, __LINE__);                        \
-        fprintf(stderr, __VA_ARGS__);                                         \
-        fprintf(stderr, "\n");                                                \
-    } while (0)
-
-
-#define ERROR(...)                                                            \
-    do {                                                                      \
-        INFO(__VA_ARGS__);                                                    \
-        abort();                                                              \
-    } while (0)
-
-#define ERROR_ON(cond, ...)                                                   \
-    do {                                                                      \
-        if (cond) {                                                           \
-            ERROR(__VA_ARGS__);                                               \
-        }                                                                     \
-    } while (0)
-
 namespace ocx { namespace arm {
 
     using std::max;
-    using std::string;
-    using std::pair;
     using std::move;
-    using std::shared_ptr;
 
     const u64 PS_PER_SEC = 1000000000000ull;
 
@@ -102,12 +53,6 @@ namespace ocx { namespace arm {
         return (1ull << width) - 1;
     }
 
-    static u64 realtime_ms() {
-        using namespace std::chrono;
-        auto now = high_resolution_clock::now();
-        return time_point_cast<milliseconds>(now).time_since_epoch().count();
-    }
-
     static uc_tx_result_t translate_response(response resp) {
         switch (resp) {
         case RESP_OK:
@@ -126,6 +71,17 @@ namespace ocx { namespace arm {
         }
     }
 
+    struct flush_page_mmuidx_args {
+        u64 addr;
+        uint16_t idxmap;
+    };
+
+    u64 realtime_ms() {
+        using namespace std::chrono;
+        auto now = high_resolution_clock::now();
+        return time_point_cast<milliseconds>(now).time_since_epoch().count();
+    }
+
     enum syscallno {
         TLB_FLUSH               = 0x01,
         TLB_FLUSH_PAGE          = 0x02,
@@ -139,176 +95,6 @@ namespace ocx { namespace arm {
         ARM_TIMER_HYP  = 2,
         ARM_TIMER_SEC  = 3,
         ARM_TIMER_NUM  = 4,
-    };
-
-    class core : public ocx::core
-    {
-    public:
-        core() = delete;
-        core(env &env, const model* modl);
-        virtual ~core();
-
-        // ocx core overrides
-        const char* provider() override;
-
-        virtual const char* arch() override;
-        virtual const char* arch_gdb() override;
-        virtual const char* arch_family() override;
-
-        virtual u64 page_size() override;
-
-        virtual void set_id(u64 procid, u64 coreid) override;
-
-        virtual u64 step(u64 num_insn) override;
-        virtual void stop() override;
-        virtual u64 insn_count() override;
-
-        virtual void reset() override;
-        virtual void interrupt(u64 irq, bool set) override;
-
-        virtual void notified(u64 eventid) override;
-
-        virtual u64 pc_regid() override;
-        virtual u64 sp_regid() override;
-        virtual u64 num_regs() override;
-
-        virtual size_t      reg_size(u64 reg) override;
-        virtual const char* reg_name(u64 reg) override;
-
-        virtual bool read_reg(u64 regid, void* buf) override;
-        virtual bool write_reg(u64 reg, const void* buf) override;
-
-        virtual bool add_breakpoint(u64 addr) override;
-        virtual bool remove_breakpoint(u64 addr) override;
-
-        virtual bool add_watchpoint(u64 addr, u64 size, bool iswr) override;
-        virtual bool remove_watchpoint(u64 addr, u64 size, bool iswr) override;
-
-        virtual bool trace_basic_blocks(bool on) override;
-
-        virtual bool virt_to_phys(u64 paddr, u64& vaddr) override;
-
-        virtual void handle_syscall(int callno, shared_ptr<void> arg) override;
-
-        virtual u64 disassemble(u64 addr, char* buf, size_t bufsz) override;
-
-        virtual void invalidate_page_ptrs() override;
-        virtual void invalidate_page_ptr(u64 pgaddr) override;
-
-        virtual void tb_flush() override;
-        virtual void tb_flush_page(u64 start, u64 end) override;
-
-    private:
-        uc_engine*   m_uc;
-        env&         m_env;
-        const model* m_model;
-        u64          m_num_insn;
-        u64          m_start_time_ms;
-        u64          m_procid;
-        u64          m_coreid;
-
-        bool is_aarch64() const;
-        bool is_aarch32() const;
-        bool is_thumb()   const;
-
-        u64 get_program_counter() const;
-
-        size_t read_mem_virt(u64 addr, void* buf, size_t bufsz);
-        size_t write_mem_virt(u64 addr, const void* buf, size_t bufsz);
-        size_t access_mem_phys(u64 addr, u8* buf, size_t bufsz, bool iswr);
-
-        // unicorn callbacks
-        static uint64_t helper_time(void* cpu, u64 clock);
-        static void helper_time_irq(void* cpu, int idx, int set);
-        static void helper_schedule(void* cpu, int idx, u64 clock, u64 ticks);
-
-        static bool helper_dmi(void* arg, u64 addr, unsigned char** dmiptr,
-                               int* prot);
-        static void helper_pgprot(void* arg, unsigned char* p, uint64_t addr);
-
-        static uc_tx_result_t helper_transport(uc_engine* uc, void* cpu,
-                                               uc_mmio_tx_t* tx);
-
-        static void helper_tlb_cluster_flush(void* cpu);
-        static void helper_tlb_cluster_flush_page(void* cpu, u64 addr);
-        static void helper_tlb_cluster_flush_mmuidx(void* cpu, uint16_t map);
-        static void helper_tlb_cluster_flush_page_mmuidx(void* cpu, u64 addr,
-                                                         uint16_t map);
-
-        static void helper_breakpoint(void* cpu, u64 addr);
-        static void helper_watchpoint(void* cpu, u64 addr, u64 size, u64 data,
-                                      bool iswr);
-
-        static void helper_trace_bb(void* cpu, u64 pc);
-
-        static void helper_hint(void* opaque, uc_hint_t hint);
-        static u64 helper_semihosting(void* opaque, u32 call);
-
-        static const char* helper_config(void* opaque, const char* config);
-
-        struct flush_page_mmuidx_args {
-            u64 addr;
-            uint16_t idxmap;
-        };
-
-        class disassembler {
-        public:
-            disassembler(core& parent);
-            ~disassembler();
-            u64 disassemble(u64 addr, char* buf, size_t bufsz);
-            
-        private:
-            csh lookup_disassembler() const;
-
-        private:
-            core& m_core;
-            csh   m_cap_aarch64;
-            csh   m_cap_aarch32;
-            csh   m_cap_thumb;
-        } m_disassembler;
-
-        class semihosting {
-        public:
-            semihosting(core& parent) : m_core(parent) {}
-            u64 execute(u32 call);
-
-        private:
-            enum semihosting_call {
-                SHC_OPEN    = 0x01,
-                SHC_CLOSE   = 0x02,
-                SHC_WRITEC  = 0x03,
-                SHC_WRITE0  = 0x04,
-                SHC_WRITE   = 0x05,
-                SHC_READ    = 0x06,
-                SHC_READC   = 0x07,
-                SHC_ISERR   = 0x08,
-                SHC_ISTTY   = 0x09,
-                SHC_SEEK    = 0x0a,
-                SHC_FLEN    = 0x0c,
-                SHC_TMPNAM  = 0x0d,
-                SHC_REMOVE  = 0x0e,
-                SHC_RENAME  = 0x0f,
-                SHC_CLOCK   = 0x10,
-                SHC_TIME    = 0x11,
-                SHC_SYSTEM  = 0x12,
-                SHC_ERRNO   = 0x13,
-                SHC_CMDLINE = 0x15,
-                SHC_HEAP    = 0x16,
-                SHC_EXIT    = 0x18,
-                SHC_EXIT2   = 0x20,
-                SHC_ELAPSED = 0x30,
-                SHC_TICKFQ  = 0x31,
-            };
-
-            string rd_string(u64 addr, size_t n);
-            u64    rd_reg(unsigned int no);
-            u64    rd_field(int n);
-
-            static int modeflags(int mode);
-
-        private:
-            core& m_core;
-        } m_semihosting;
     };
 
     core::core(env &env, const model* modl) :
@@ -976,331 +762,6 @@ namespace ocx { namespace arm {
         return cpu->m_env.get_param(config);
     }
 
-    //
-    // ARM disassembler
-    //
-
-    core::disassembler::disassembler(core& parent)
-    : m_core(parent),
-      m_cap_aarch64(),
-      m_cap_aarch32(),
-      m_cap_thumb()
-    {
-        if (m_core.m_model->has_aarch64()) {
-            cs_arch arch = CS_ARCH_ARM64;
-            cs_mode mode = CS_MODE_LITTLE_ENDIAN;
-            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch64);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
-        }
-
-        if (m_core.m_model->has_aarch32()) {
-            cs_arch arch = CS_ARCH_ARM;
-            cs_mode mode = CS_MODE_LITTLE_ENDIAN;
-            cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch32);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
-
-            arch = CS_ARCH_ARM;
-            mode = CS_MODE_THUMB;
-            cs_ret = cs_open(arch, mode, &m_cap_thumb);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
-        }
-    }
-
-    csh core::disassembler::lookup_disassembler() const {
-        if (m_core.is_thumb())
-            return m_cap_thumb;
-        if (m_core.is_aarch32())
-            return m_cap_aarch32;
-        if (m_core.is_aarch64())
-            return m_cap_aarch64;
-        return 0;
-    }
-
-    u64 core::disassembler::disassemble(u64 addr, char* buf, size_t bufsz) {
-        ERROR_ON(bufsz == 0, "unexpected zero bufsz");
-
-        u32 insn = 0;
-        u64 size = m_core.read_mem_virt(addr, &insn, 4);
-
-        if (!m_core.is_thumb() && size != 4)
-            return 0;
-
-        if (m_core.is_thumb() && size != 2 && size != 4)
-            return 0;
-
-        cs_insn* sym;
-        csh disas = lookup_disassembler();
-        ERROR_ON(!disas, "no disassembler available");
-
-        if (cs_disasm(disas, (const u8*)&insn, size, 0, 1, &sym)) {
-            snprintf(buf, bufsz, "%s %s", sym->mnemonic, sym->op_str);
-            u64 len = sym->size;
-            cs_free(sym, 1);
-            return len;
-        }
-
-        // show as data, resize is until next aligned address
-        snprintf(buf, bufsz, ".data");
-        return ((addr + size) & ~(size - 1)) - addr;
-    }
-
-    core::disassembler::~disassembler() {
-        if (m_cap_aarch64)
-            cs_close(&m_cap_aarch64);
-
-        if (m_cap_aarch32)
-            cs_close(&m_cap_aarch32);
-
-        if (m_cap_thumb)
-            cs_close(&m_cap_thumb);
-    }
-
-    //
-    // ARM semihosting implementation
-    //
-
-    string core::semihosting::rd_string(u64 addr, size_t n) {
-        string result;
-        char buffer = ~0;
-        while (n-- && buffer != '\0') {
-            if (m_core.read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
-                ERROR("failed to read char at 0x%016llx", addr - 1);
-            result += buffer;
-        }
-
-        return result;
-    }
-
-    u64 core::semihosting::rd_reg(unsigned int no) {
-        ERROR_ON(no > 1, "unexpected semihost reg read %u", no);
-        u64 val = ~0ull;
-        no += (m_core.is_aarch64() ? (int)UC_ARM64_REG_X0 : (int)UC_ARM_REG_R0);
-        uc_err r = uc_reg_read(m_core.m_uc, no, &val);
-        ERROR_ON(r != UC_ERR_OK, "failed to read reg %u", no);
-        return val;
-    }
-
-    u64 core::semihosting::rd_field(int n) {
-        const u64 size = m_core.is_aarch64() ? sizeof(u64) : sizeof(u32);
-        u64 addr = rd_reg(1) + n * size;
-        u64 field = 0;
-
-        if (m_core.read_mem_virt(addr, (unsigned char*)&field, size) != size)
-            ERROR("failed to read address 0x%016llx", addr);
-
-        return field;
-    }
-
-    int core::semihosting::modeflags(int mode) {
-        // bit 0 of mode stores "b" info, which is not needed for open
-        switch (mode >> 1) {
-        case 0: return O_RDONLY; // "r" and "rb"
-        case 1: return O_RDWR;   // "r+" and "r+b"
-        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
-        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
-        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
-        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
-        default:
-            ERROR("illegal open mode %d", mode);
-        }
-    }
-
-    u64 core::semihosting::execute(u32 call) {
-        switch (call) {
-        case SHC_CLOCK:
-            return (realtime_ms() - m_core.m_start_time_ms) / 10;
-
-        case SHC_TIME:
-            return time(NULL);
-
-        case SHC_ELAPSED:
-            return m_core.m_num_insn + uc_instruction_count(m_core.m_uc);
-
-        case SHC_TICKFQ:
-            return CLOCKS_PER_SEC;
-
-        case SHC_EXIT:
-            INFO("arm semihosting: software exit request");
-            exit((int)rd_reg(1));
-
-        case SHC_EXIT2:
-            INFO("arm semihosting: software exit request");
-            exit((int)(rd_reg(1) >> 32));
-
-        case SHC_READC:
-            return getchar();
-
-        case SHC_ERRNO:
-            return errno;
-
-        case SHC_WRITEC: {
-            unsigned char c;
-            u64 addr = rd_reg(1);
-            if (m_core.read_mem_virt(addr, &c, sizeof(c)) != sizeof(c))
-                return ~0ull;
-            putchar(c);
-            return c;
-        }
-
-        case SHC_WRITE0: {
-            unsigned char c;
-            u64 addr = rd_reg(1);
-            do {
-                if (m_core.read_mem_virt(addr++, &c, sizeof(c)) != sizeof(c))
-                    break;
-                if (c != '\0')
-                    putchar(c);
-            } while (c != '\0');
-            return addr;
-        }
-
-        case SHC_OPEN: {
-            u64 addr = rd_field(0);
-            u64 mode = rd_field(1);
-            u64 size = rd_field(2);
-
-            string file = rd_string(addr, size);
-
-            if (file == ":tt") {
-                return (mode < 4) ? STDIN_FILENO :
-                       (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
-            }
-
-            return open(file.c_str(), modeflags((int)mode));
-        }
-
-        case SHC_CLOSE: {
-            u64 file = rd_field(0);
-            close((int)file);
-            return 0;
-        }
-
-        case SHC_WRITE: {
-            u64 file = rd_field(0);
-            u64 addr = rd_field(1);
-            u64 size = rd_field(2);
-
-            while (size > 0) {
-                unsigned char buffer = 0;
-                if (m_core.read_mem_virt(addr, &buffer, 1) != 1)
-                    return size;
-
-                if (write((int)file, &buffer, 1) != 1)
-                    return size;
-
-                size--;
-                addr++;
-            }
-
-            return 0;
-        }
-
-        case SHC_ISTTY: {
-            u64 file = rd_field(0);
-            return isatty((int)file);
-        }
-
-        case SHC_FLEN: {
-            int fd = (int)rd_field(0);
-            off_t curr = lseek(fd, 0, SEEK_CUR);
-            if (curr == -1) return (u64)-1;
-            off_t size = lseek(fd, 0, SEEK_END);
-            if (size == -1) return (u64)-1;
-            off_t res = lseek(fd, curr, SEEK_SET);
-            if (res == -1) return (u64)-1;
-            return size;
-        }
-
-        case SHC_READ: {
-            u64 file = rd_field(0);
-            u64 addr = rd_field(1);
-            u64 size = rd_field(2);
-
-            u8 buffer[4096];
-            size_t bytes_read = 0;
-            size_t bytes_todo = size;
-
-            while (bytes_todo > 0) {
-                size_t sz = bytes_todo;
-                if (sz > sizeof(buffer))
-                    sz = sizeof(buffer);
-
-                ssize_t n = read((int)file, buffer, (unsigned int)sz);
-                if (n < 0) {
-                    INFO("arm semihosting read failure %s", strerror(errno));
-                    return bytes_todo;
-                }
-
-                if (n == 0)
-                    return bytes_todo;
-
-                if (m_core.write_mem_virt(addr + bytes_read, buffer, n) != 
-                    (size_t)n) {
-                    INFO("arm semihosting store failure");
-                    return bytes_todo;
-                }
-
-                bytes_read += n;
-                bytes_todo -= n;
-            }
-
-            return bytes_todo;
-        }
-
-        case SHC_SEEK: {
-            u64 file = rd_field(0);
-            u64 offset = rd_field(1);
-            if (lseek((int)file, (long)offset, SEEK_SET) != (off_t)offset)
-                return (u64)-1;
-            return 0;
-        }
-
-        case SHC_ISERR: {
-            u64 status = rd_field(0);
-            return status ? (u64)-1  : 0; // assume 0 means "success"
-        }
-
-        case SHC_CMDLINE: {
-            u64 addr = rd_field(0);
-            u64 size = rd_field(1);
-
-            const char* cmdline_str = m_core.m_env.get_param("command_line");
-            if (!cmdline_str)
-                return (u64)-1;
-
-            string cmdline(cmdline_str);
-            if (cmdline.empty())
-                return (u64)-1;
-
-            size_t length = cmdline.length();
-            if (length >= size)
-                length = size - 1;
-
-            u8 zero = 0;
-            const char* data = cmdline.c_str();
-
-            if (m_core.write_mem_virt(addr, data, length) != length)
-                return (u64)-1;
-
-            if (m_core.write_mem_virt(addr + length, &zero, 1) != 1)
-                return (u64)-1;
-
-            return 0;
-        }
-
-        case SHC_TMPNAM:
-        case SHC_REMOVE:
-        case SHC_RENAME:
-        case SHC_SYSTEM:
-        case SHC_HEAP:
-        default:
-            INFO("arm semihosting: unsupported call %x", call);
-            break;
-        }
-
-        return ~0ull;
-    }
-
     } // namespace arm
 
     //
@@ -1329,4 +790,3 @@ namespace ocx { namespace arm {
         delete cpu;
     }
 }
-

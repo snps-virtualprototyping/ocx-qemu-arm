@@ -46,7 +46,10 @@ set(inc "${OCX_HOME}/include"
         "${CAPSTONE_HOME}/include"
         "${UNICORN_HOME}/include")
 set(src "${CMAKE_CURRENT_SOURCE_DIR}/src")
-set(sources "${src}/armcore.cpp" "${src}/modeldb.cpp")
+set(sources "${src}/armcore.cpp" 
+            "${src}/semihosting.cpp"
+            "${src}/disassembler.cpp"
+            "${src}/modeldb.cpp")
 
 add_library(ocx-qemu-arm MODULE ${sources})
 
