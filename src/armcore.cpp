@@ -26,6 +26,7 @@
 #include <utility>
 #include <time.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 #include "modeldb.h"
 
@@ -47,8 +48,6 @@
 #  define STDOUT_FILENO 1
 #  define STDERR_FILENO 2
 #  pragma warning(disable: 4505 4800 4996)
-#else
-#  pragma GCC diagnostic ignored "-Wformat"
 #endif
 
 #define INFO(...)                                                             \
@@ -125,33 +124,6 @@ namespace ocx { namespace arm {
             ERROR("unexpected response (%d)", resp);
         }
     }
-
-    enum semihosting_call {
-        SHC_OPEN    = 0x01,
-        SHC_CLOSE   = 0x02,
-        SHC_WRITEC  = 0x03,
-        SHC_WRITE0  = 0x04,
-        SHC_WRITE   = 0x05,
-        SHC_READ    = 0x06,
-        SHC_READC   = 0x07,
-        SHC_ISERR   = 0x08,
-        SHC_ISTTY   = 0x09,
-        SHC_SEEK    = 0x0a,
-        SHC_FLEN    = 0x0c,
-        SHC_TMPNAM  = 0x0d,
-        SHC_REMOVE  = 0x0e,
-        SHC_RENAME  = 0x0f,
-        SHC_CLOCK   = 0x10,
-        SHC_TIME    = 0x11,
-        SHC_SYSTEM  = 0x12,
-        SHC_ERRNO   = 0x13,
-        SHC_CMDLINE = 0x15,
-        SHC_HEAP    = 0x16,
-        SHC_EXIT    = 0x18,
-        SHC_EXIT2   = 0x20,
-        SHC_ELAPSED = 0x30,
-        SHC_TICKFQ  = 0x31,
-    };
 
     enum syscallno {
         TLB_FLUSH               = 0x01,
@@ -247,11 +219,11 @@ namespace ocx { namespace arm {
         size_t read_mem_virt(u64 addr, void* buf, size_t bufsz);
         size_t write_mem_virt(u64 addr, const void* buf, size_t bufsz);
         size_t access_mem_phys(u64 addr, u8* buf, size_t bufsz, bool iswr);
-        string semihosting_read_string(u64 addr, size_t n);
 
-        u64 semihosting_get_reg(unsigned int no);
-        u64 semihosting_read_field(int n);
-        u64 semihosting(u32 call);
+        string semihosting_read_string(u64 addr, size_t n);
+        u64    semihosting_read_reg(unsigned int no);
+        u64    semihosting_read_field(int n);
+        u64    semihosting(u32 call);
 
         // unicorn callbacks
         static uint64_t helper_time(void* cpu, u64 clock);
@@ -342,19 +314,19 @@ namespace ocx { namespace arm {
             cs_arch arch = CS_ARCH_ARM64;
             cs_mode mode = CS_MODE_LITTLE_ENDIAN;
             cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch64);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
+            ERROR_ON(cs_ret != CS_ERR_OK, "error setup capstone disassembler");
         }
 
         if (modl->has_aarch32()) {
             cs_arch arch = CS_ARCH_ARM;
             cs_mode mode = CS_MODE_LITTLE_ENDIAN;
             cs_err cs_ret = cs_open(arch, mode, &m_cap_aarch32);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
+            ERROR_ON(cs_ret != CS_ERR_OK, "error setup capstone disassembler");
 
             arch = CS_ARCH_ARM;
             mode = CS_MODE_THUMB;
             cs_ret = cs_open(arch, mode, &m_cap_thumb);
-            ERROR_ON(cs_ret != CS_ERR_OK, "error starting capstone disassembler");
+            ERROR_ON(cs_ret != CS_ERR_OK, "error setup capstone disassembler");
         }
     }
 
@@ -475,13 +447,13 @@ namespace ocx { namespace arm {
         if (irq >= sizeof(IRQMAP) / sizeof(IRQMAP[0]))
             return;
         uc_err ret = uc_interrupt(m_uc, IRQMAP[irq], set);
-        ERROR_ON(ret != UC_ERR_OK, "error dispatching irq (%llu)", irq);
+        ERROR_ON(ret != UC_ERR_OK, "error dispatching irq %" PRIu64, irq);
     }
 
     void core::notified(u64 eventid) {
         static_assert(ARM_TIMER_PHYS == 0, "unexpected ARM_TIMER_PHYS value");
         if (eventid > ARM_TIMER_SEC)
-            ERROR("invalid timer index %llu", eventid);
+            ERROR("invalid timer index %" PRIu64, eventid);
         uc_err ret = uc_update_timer(m_uc, (int)eventid);
         ERROR_ON(ret != UC_ERR_OK, "timer update: %s", uc_strerror(ret));
     }
@@ -499,17 +471,20 @@ namespace ocx { namespace arm {
     };
 
     size_t core::reg_size(u64 reg) {
-        ERROR_ON(reg >= num_regs(), "register index %llu out of bounds", reg);
+        ERROR_ON(reg >= num_regs(), 
+                 "register index %" PRIu64 " out of bounds", reg);
         return max(m_model->registers[reg].width / 8, 1);
     }
 
     const char* core::reg_name(u64 reg) {
-        ERROR_ON(reg >= num_regs(), "register index %llu out of bounds", reg);
+        ERROR_ON(reg >= num_regs(), 
+                 "register index %" PRIu64 " out of bounds", reg);
         return m_model->registers[reg].name;
     };
 
     bool core::read_reg(u64 idx, void* buf) {
-        ERROR_ON(idx >= num_regs(), "register index %llu out of bounds", idx);
+        ERROR_ON(idx >= num_regs(), 
+                 "register index %" PRIu64 " out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
         const u64 size = reg_size(idx);
@@ -531,7 +506,8 @@ namespace ocx { namespace arm {
     }
 
     bool core::write_reg(u64 idx, const void *buf) {
-        ERROR_ON(idx >= num_regs(), "register index %llu out of bounds", idx);
+        ERROR_ON(idx >= num_regs(), 
+                 "register index %" PRIu64 " out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
         const u64 size = reg_size(idx);
@@ -751,7 +727,7 @@ namespace ocx { namespace arm {
                 if (page_read != size)
                     return bytes_read + page_read;
             } catch (...) {
-                fprintf(stderr, "error reading memory at %016llx\n", phys);
+                INFO("error reading memory at %016" PRIx64 , phys);
                 return bytes_read;
             }
 
@@ -785,7 +761,7 @@ namespace ocx { namespace arm {
                  if (page_written != size)
                      return bytes_written + page_written;
              } catch (...) {
-                 fprintf(stderr, "error writing memory at %016llx\n", phys);
+                 INFO("error writing memory at %016" PRIx64, phys);
                  return bytes_written;
              }
 
@@ -796,247 +772,6 @@ namespace ocx { namespace arm {
          }
 
          return bytes_written;
-    }
-
-    string core::semihosting_read_string(u64 addr, size_t n) {
-        string result;
-        char buffer = ~0;
-        while (n-- && buffer != '\0') {
-            if (read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
-                ERROR("failed to read char at 0x%016llx", addr - 1);
-            result += buffer;
-        }
-
-        return result;
-    }
-
-    u64 core::semihosting_get_reg(unsigned int no) {
-        ERROR_ON(no > 1, "unexpected semihost reg read %u", no);
-        u64 val = ~0ull;
-        no = (is_aarch64() ? (int)UC_ARM64_REG_X0 : (int)UC_ARM_REG_R0) + no;
-        uc_err r = uc_reg_read(m_uc, no, &val);
-        ERROR_ON(r != UC_ERR_OK, "failed to read reg %u", no);
-        return val;
-    }
-
-    u64 core::semihosting_read_field(int n) {
-        const u64 size = is_aarch64() ? sizeof(u64) : sizeof(u32);
-        u64 addr = semihosting_get_reg(1) + n * size;
-        u64 field = 0;
-
-        if (read_mem_virt(addr, (unsigned char*)&field, size) != size)
-            ERROR("failed to read address 0x%016llx", addr);
-
-        return field;
-    }
-
-    static int modeflags(int mode) {
-        // bit 0 of mode stores "b" info, which is not needed for open
-        switch (mode >> 1) {
-        case 0: return O_RDONLY; // "r" and "rb"
-        case 1: return O_RDWR;   // "r+" and "r+b"
-        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
-        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
-        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
-        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
-        default:
-            ERROR("illegal open mode %d", mode);
-        }
-    }
-
-    u64 core::semihosting(u32 call) {
-        switch (call) {
-        case SHC_CLOCK:
-            return (realtime_ms() - m_start_time_ms) / 10;
-
-        case SHC_TIME:
-            return time(NULL);
-
-        case SHC_ELAPSED:
-            return m_num_insn + uc_instruction_count(m_uc);
-
-        case SHC_TICKFQ:
-            return CLOCKS_PER_SEC;
-
-        case SHC_EXIT:
-            INFO("arm semihosting: software exit request");
-            exit((int)semihosting_get_reg(1));
-
-        case SHC_EXIT2:
-            INFO("arm semihosting: software exit request");
-            exit((int)(semihosting_get_reg(1) >> 32));
-
-        case SHC_READC:
-            return getchar();
-
-        case SHC_ERRNO:
-            return errno;
-
-        case SHC_WRITEC: {
-            unsigned char c;
-            u64 addr = semihosting_get_reg(1);
-            if (read_mem_virt(addr, &c, sizeof(c)) != sizeof(c))
-                return ~0ull;
-            putchar(c);
-            return c;
-        }
-
-        case SHC_WRITE0: {
-            unsigned char c;
-            u64 addr = semihosting_get_reg(1);
-            do {
-                if (read_mem_virt(addr++, &c, sizeof(c)) != sizeof(c))
-                    break;
-                if (c != '\0')
-                    putchar(c);
-            } while (c != '\0');
-            return addr;
-        }
-
-        case SHC_OPEN: {
-            u64 addr = semihosting_read_field(0);
-            u64 mode = semihosting_read_field(1);
-            u64 size = semihosting_read_field(2);
-
-            string file = semihosting_read_string(addr, size);
-
-            if (file == ":tt") {
-                return (mode < 4) ? STDIN_FILENO :
-                       (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
-            }
-
-            return open(file.c_str(), modeflags((int)mode));
-        }
-
-        case SHC_CLOSE: {
-            u64 file = semihosting_read_field(0);
-            close((int)file);
-            return 0;
-        }
-
-        case SHC_WRITE: {
-            u64 file = semihosting_read_field(0);
-            u64 addr = semihosting_read_field(1);
-            u64 size = semihosting_read_field(2);
-
-            while (size > 0) {
-                unsigned char buffer = 0;
-                if (read_mem_virt(addr, &buffer, 1) != 1)
-                    return size;
-
-                if (write((int)file, &buffer, 1) != 1)
-                    return size;
-
-                size--;
-                addr++;
-            }
-
-            return 0;
-        }
-
-        case SHC_ISTTY: {
-            u64 file = semihosting_read_field(0);
-            return isatty((int)file);
-        }
-
-        case SHC_FLEN: {
-            int fd = (int)semihosting_read_field(0);
-            off_t curr = lseek(fd, 0, SEEK_CUR);
-            if (curr == -1) return (u64)-1;
-            off_t size = lseek(fd, 0, SEEK_END);
-            if (size == -1) return (u64)-1;
-            off_t res = lseek(fd, curr, SEEK_SET);
-            if (res == -1) return (u64)-1;
-            return size;
-        }
-
-        case SHC_READ: {
-            u64 file = semihosting_read_field(0);
-            u64 addr = semihosting_read_field(1);
-            u64 size = semihosting_read_field(2);
-
-            u8 buffer[4096];
-            size_t bytes_read = 0;
-            size_t bytes_todo = size;
-
-            while (bytes_todo > 0) {
-                size_t sz = bytes_todo;
-                if (sz > sizeof(buffer))
-                    sz = sizeof(buffer);
-
-                ssize_t n = read((int)file, buffer, (unsigned int)sz);
-                if (n < 0) {
-                    INFO("arm semihosting read failure %s", strerror(errno));
-                    return bytes_todo;
-                }
-
-                if (n == 0)
-                    return bytes_todo;
-
-                if (write_mem_virt(addr + bytes_read, buffer, n) != (size_t)n) {
-                    INFO("arm semihosting store failure");
-                    return bytes_todo;
-                }
-
-                bytes_read += n;
-                bytes_todo -= n;
-            }
-
-            return bytes_todo;
-        }
-
-        case SHC_SEEK: {
-            u64 file = semihosting_read_field(0);
-            u64 offset = semihosting_read_field(1);
-            if (lseek((int)file, (long)offset, SEEK_SET) != (off_t)offset)
-                return (u64)-1;
-            return 0;
-        }
-
-        case SHC_ISERR: {
-            u64 status = semihosting_read_field(0);
-            return status ? (u64)-1  : 0; // assume 0 means "success"
-        }
-
-        case SHC_CMDLINE: {
-            u64 addr = semihosting_read_field(0);
-            u64 size = semihosting_read_field(1);
-
-            const char* cmdline_str = m_env.get_param("command_line");
-            if (!cmdline_str)
-                return (u64)-1;
-
-            string cmdline(cmdline_str);
-            if (cmdline.empty())
-                return (u64)-1;
-
-            size_t length = cmdline.length();
-            if (length >= size)
-                length = size - 1;
-
-            u8 zero = 0;
-            const char* data = cmdline.c_str();
-
-            if (write_mem_virt(addr, data, length) != length)
-                return (u64)-1;
-
-            if (write_mem_virt(addr + length, &zero, 1) != 1)
-                return (u64)-1;
-
-            return 0;
-        }
-
-        case SHC_TMPNAM:
-        case SHC_REMOVE:
-        case SHC_RENAME:
-        case SHC_SYSTEM:
-        case SHC_HEAP:
-        default:
-            INFO("arm semihosting: unsupported call %x", call);
-            break;
-        }
-
-        return ~0ull;
     }
 
 #ifdef _MSC_VER
@@ -1066,9 +801,9 @@ namespace ocx { namespace arm {
 
     uint64_t core::helper_time(void* opaque, u64 clock) {
         core* cpu = (core*)opaque;
-        u64 ticks;
         bool overflow;
-        ticks = mult_div_128(cpu->m_env.get_time_ps(), clock, PS_PER_SEC, overflow);
+        u64 time_ps = cpu->m_env.get_time_ps();
+        u64 ticks = mult_div_128(time_ps, clock, PS_PER_SEC, overflow);
         ERROR_ON(overflow, "ticks out of bounds");
         return ticks;
     }
@@ -1255,12 +990,284 @@ namespace ocx { namespace arm {
         return cpu->m_env.get_param(config);
     }
 
+    //
+    // ARM semihosting implementation
+    //
+    
+    string core::semihosting_read_string(u64 addr, size_t n) {
+        string result;
+        char buffer = ~0;
+        while (n-- && buffer != '\0') {
+            if (read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
+                ERROR("failed to read char at 0x%016" PRIx64, addr - 1);
+            result += buffer;
+        }
+
+        return result;
+    }
+
+    u64 core::semihosting_read_reg(unsigned int no) {
+        ERROR_ON(no > 1, "unexpected semihost reg read %u", no);
+        u64 val = ~0ull;
+        no = (is_aarch64() ? (int)UC_ARM64_REG_X0 : (int)UC_ARM_REG_R0) + no;
+        uc_err r = uc_reg_read(m_uc, no, &val);
+        ERROR_ON(r != UC_ERR_OK, "failed to read reg %u", no);
+        return val;
+    }
+
+    u64 core::semihosting_read_field(int n) {
+        const u64 size = is_aarch64() ? sizeof(u64) : sizeof(u32);
+        u64 addr = semihosting_read_reg(1) + n * size;
+        u64 field = 0;
+
+        if (read_mem_virt(addr, (unsigned char*)&field, size) != size)
+            ERROR("failed to read address 0x%016" PRIx64, addr);
+
+        return field;
+    }
+
+    static int semihosting_modeflags(int mode) {
+        // bit 0 of mode stores "b" info, which is not needed for open
+        switch (mode >> 1) {
+        case 0: return O_RDONLY; // "r" and "rb"
+        case 1: return O_RDWR;   // "r+" and "r+b"
+        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
+        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
+        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
+        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
+        default:
+            ERROR("illegal open mode %d", mode);
+        }
+    }
+
+    u64 core::semihosting(u32 call) {
+        enum semihosting_call {
+            SHC_OPEN    = 0x01,
+            SHC_CLOSE   = 0x02,
+            SHC_WRITEC  = 0x03,
+            SHC_WRITE0  = 0x04,
+            SHC_WRITE   = 0x05,
+            SHC_READ    = 0x06,
+            SHC_READC   = 0x07,
+            SHC_ISERR   = 0x08,
+            SHC_ISTTY   = 0x09,
+            SHC_SEEK    = 0x0a,
+            SHC_FLEN    = 0x0c,
+            SHC_TMPNAM  = 0x0d,
+            SHC_REMOVE  = 0x0e,
+            SHC_RENAME  = 0x0f,
+            SHC_CLOCK   = 0x10,
+            SHC_TIME    = 0x11,
+            SHC_SYSTEM  = 0x12,
+            SHC_ERRNO   = 0x13,
+            SHC_CMDLINE = 0x15,
+            SHC_HEAP    = 0x16,
+            SHC_EXIT    = 0x18,
+            SHC_EXIT2   = 0x20,
+            SHC_ELAPSED = 0x30,
+            SHC_TICKFQ  = 0x31,
+        };
+
+        switch (call) {
+        case SHC_CLOCK:
+            return (realtime_ms() - m_start_time_ms) / 10;
+
+        case SHC_TIME:
+            return time(NULL);
+
+        case SHC_ELAPSED:
+            return m_num_insn + uc_instruction_count(m_uc);
+
+        case SHC_TICKFQ:
+            return CLOCKS_PER_SEC;
+
+        case SHC_EXIT:
+            INFO("arm semihosting: software exit request");
+            exit((int)semihosting_read_reg(1));
+
+        case SHC_EXIT2:
+            INFO("arm semihosting: software exit request");
+            exit((int)(semihosting_read_reg(1) >> 32));
+
+        case SHC_READC:
+            return getchar();
+
+        case SHC_ERRNO:
+            return errno;
+
+        case SHC_WRITEC: {
+            unsigned char c;
+            u64 addr = semihosting_read_reg(1);
+            if (read_mem_virt(addr, &c, sizeof(c)) != sizeof(c))
+                return ~0ull;
+            putchar(c);
+            return c;
+        }
+
+        case SHC_WRITE0: {
+            unsigned char c;
+            u64 addr = semihosting_read_reg(1);
+            do {
+                if (read_mem_virt(addr++, &c, sizeof(c)) != sizeof(c))
+                    break;
+                if (c != '\0')
+                    putchar(c);
+            } while (c != '\0');
+            return addr;
+        }
+
+        case SHC_OPEN: {
+            u64 addr = semihosting_read_field(0);
+            u64 mode = semihosting_read_field(1);
+            u64 size = semihosting_read_field(2);
+
+            string file = semihosting_read_string(addr, size);
+
+            if (file == ":tt") {
+                return (mode < 4) ? STDIN_FILENO :
+                       (mode < 8) ? STDOUT_FILENO : STDERR_FILENO;
+            }
+
+            return open(file.c_str(), semihosting_modeflags((int)mode));
+        }
+
+        case SHC_CLOSE: {
+            u64 file = semihosting_read_field(0);
+            close((int)file);
+            return 0;
+        }
+
+        case SHC_WRITE: {
+            u64 file = semihosting_read_field(0);
+            u64 addr = semihosting_read_field(1);
+            u64 size = semihosting_read_field(2);
+
+            while (size > 0) {
+                unsigned char buffer = 0;
+                if (read_mem_virt(addr, &buffer, 1) != 1)
+                    return size;
+
+                if (write((int)file, &buffer, 1) != 1)
+                    return size;
+
+                size--;
+                addr++;
+            }
+
+            return 0;
+        }
+
+        case SHC_ISTTY: {
+            u64 file = semihosting_read_field(0);
+            return isatty((int)file);
+        }
+
+        case SHC_FLEN: {
+            int fd = (int)semihosting_read_field(0);
+            off_t curr = lseek(fd, 0, SEEK_CUR);
+            if (curr == -1) return (u64)-1;
+            off_t size = lseek(fd, 0, SEEK_END);
+            if (size == -1) return (u64)-1;
+            off_t res = lseek(fd, curr, SEEK_SET);
+            if (res == -1) return (u64)-1;
+            return size;
+        }
+
+        case SHC_READ: {
+            u64 file = semihosting_read_field(0);
+            u64 addr = semihosting_read_field(1);
+            u64 size = semihosting_read_field(2);
+
+            u8 buffer[4096];
+            size_t bytes_read = 0;
+            size_t bytes_todo = size;
+
+            while (bytes_todo > 0) {
+                size_t sz = bytes_todo;
+                if (sz > sizeof(buffer))
+                    sz = sizeof(buffer);
+
+                ssize_t n = read((int)file, buffer, (unsigned int)sz);
+                if (n < 0) {
+                    INFO("arm semihosting read failure %s", strerror(errno));
+                    return bytes_todo;
+                }
+
+                if (n == 0)
+                    return bytes_todo;
+
+                if (write_mem_virt(addr + bytes_read, buffer, n) != (size_t)n) {
+                    INFO("arm semihosting store failure");
+                    return bytes_todo;
+                }
+
+                bytes_read += n;
+                bytes_todo -= n;
+            }
+
+            return bytes_todo;
+        }
+
+        case SHC_SEEK: {
+            u64 file = semihosting_read_field(0);
+            u64 offset = semihosting_read_field(1);
+            if (lseek((int)file, (long)offset, SEEK_SET) != (off_t)offset)
+                return (u64)-1;
+            return 0;
+        }
+
+        case SHC_ISERR: {
+            u64 status = semihosting_read_field(0);
+            return status ? (u64)-1  : 0; // assume 0 means "success"
+        }
+
+        case SHC_CMDLINE: {
+            u64 addr = semihosting_read_field(0);
+            u64 size = semihosting_read_field(1);
+
+            const char* cmdline_str = m_env.get_param("command_line");
+            if (!cmdline_str)
+                return (u64)-1;
+
+            string cmdline(cmdline_str);
+            if (cmdline.empty())
+                return (u64)-1;
+
+            size_t length = cmdline.length();
+            if (length >= size)
+                length = size - 1;
+
+            u8 zero = 0;
+            const char* data = cmdline.c_str();
+
+            if (write_mem_virt(addr, data, length) != length)
+                return (u64)-1;
+
+            if (write_mem_virt(addr + length, &zero, 1) != 1)
+                return (u64)-1;
+
+            return 0;
+        }
+
+        case SHC_TMPNAM:
+        case SHC_REMOVE:
+        case SHC_RENAME:
+        case SHC_SYSTEM:
+        case SHC_HEAP:
+        default:
+            INFO("arm semihosting: unsupported call %x", call);
+            break;
+        }
+
+        return ~0ull;
+    }
+
     } // namespace arm
 
     core* create_instance(u64 api_version, env& e, const char* variant) {
         if (api_version != OCX_API_VERSION) {
-            INFO("OCX_API_VERSION mismatch: requested %llu - "
-                 "expected %llu", api_version, OCX_API_VERSION);
+            INFO("OCX_API_VERSION mismatch: requested %" PRIu64 " - "
+                 "expected %" PRIu64, api_version, OCX_API_VERSION);
             return nullptr;
         }
 
