@@ -106,8 +106,8 @@ namespace ocx { namespace arm {
         m_start_time_ms(realtime_ms()),
         m_procid(0),
         m_coreid(0),
-        m_disassembler(*this),
-        m_semihosting(*this) {
+        m_semihosting(*this),
+        m_disassembler(*this) {
         uc_err ret = uc_open(m_model->name, this, &helper_config, &m_uc);
         ERROR_ON(ret != UC_ERR_OK, "unicorn error: %s", uc_strerror(ret));
 
