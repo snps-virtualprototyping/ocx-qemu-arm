@@ -17,13 +17,12 @@
 #include <utility>
 #include <time.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 #ifdef _MSC_VER
 #include <intrin.h>
 #include <immintrin.h>
 #include <xmmintrin.h>
-#else
-#  pragma GCC diagnostic ignored "-Wformat"
 #endif
 
 namespace ocx { namespace arm {
@@ -496,7 +495,7 @@ namespace ocx { namespace arm {
                 if (page_read != size)
                     return bytes_read + page_read;
             } catch (...) {
-                fprintf(stderr, "error reading memory at %016llx\n", phys);
+                INFO("error reading memory at %016" PRIx64, phys);
                 return bytes_read;
             }
 
@@ -530,7 +529,7 @@ namespace ocx { namespace arm {
                  if (page_written != size)
                      return bytes_written + page_written;
              } catch (...) {
-                 fprintf(stderr, "error writing memory at %016llx\n", phys);
+                 INFO("error writing memory at %016" PRIx64, phys);
                  return bytes_written;
              }
 

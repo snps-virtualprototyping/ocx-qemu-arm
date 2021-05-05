@@ -9,6 +9,7 @@
 
 #include <ctime>
 #include <fcntl.h>
+#include <stdint.h>
 
 #ifdef _MSC_VER
 #include <io.h>
@@ -66,7 +67,7 @@ namespace ocx { namespace arm {
         char buffer = ~0;
         while (n-- && buffer != '\0') {
             if (m_core.read_mem_virt(addr++, (unsigned char*)&buffer, 1) != 1)
-                ERROR("failed to read char at 0x%016llx", addr - 1);
+                ERROR("failed to read char at 0x%016" PRIx64, addr - 1);
             result += buffer;
         }
 
@@ -88,7 +89,7 @@ namespace ocx { namespace arm {
         u64 field = 0;
 
         if (m_core.read_mem_virt(addr, (unsigned char*)&field, size) != size)
-            ERROR("failed to read address 0x%016llx", addr);
+            ERROR("failed to read address 0x%016" PRIx64, addr);
 
         return field;
     }
