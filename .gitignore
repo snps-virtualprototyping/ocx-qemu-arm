@@ -3,6 +3,8 @@
 /.settings
 /setup.sh
 /.vs
+/.ccls-cache
 
 /BUILD
+/build
 /out
