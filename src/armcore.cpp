@@ -678,8 +678,9 @@ namespace ocx { namespace arm {
     }
 
     u64 core::get_program_counter() const {
-        u64 val = is_aarch64() ? ~0ull : ~0u;
-        int reg = is_aarch64() ? (int)UC_ARM64_REG_PC : (int)UC_ARM_REG_PC;
+        const bool aarch64 = is_aarch64();
+        u64 val = aarch64 ? ~0ull : ~0u;
+        int reg = aarch64 ? (int)UC_ARM64_REG_PC : (int)UC_ARM_REG_PC;
         uc_err r = uc_reg_read(m_uc, reg, &val);
         ERROR_ON(r != UC_ERR_OK, "failed to read program counter");
         return val;
@@ -775,9 +776,8 @@ namespace ocx { namespace arm {
     }
 
 #ifdef _MSC_VER
-    // MSVC does not support 128bit integral types, and the _udiv128 intrinsic
-    // is either not present or does not work but we are linking against the
-    // mingw libgcc.a lib anyway so we can use __udivti3 from there
+    // MSVC does not support arithemtic on 128bit integral types, but we are
+    // linking mingw libgcc.a lib anyway so we can use __udivti3 from there
 
     extern "C" __m128 __udivti3(__m128* dividend, __m128* divisor);
 
@@ -790,13 +790,40 @@ namespace ocx { namespace arm {
         overflow = (bool)r.m128_u64[1];
         return r.m128_u64[0];
     }
+
+    inline void add_128_64(__m128& a, u64 b) {
+        u8 c1 = _addcarry_u64( 0, a.m128_u64[0], b, &a.m128_u64[0]);
+        u8 c2 = _addcarry_u64(c1, a.m128_u64[1], 0, &a.m128_u64[1]);
+    }
+
+    inline u64 mult_div_128_round_up(u64 mult1, u64 mult2, u64 quot, bool& overflow) {
+        __m128 p, q;
+        p.m128_u64[0] = _umul128(mult1, mult2, &p.m128_u64[1]);
+        add_128_64(p, quot - 1);
+        q.m128_u64[0] = quot;
+        q.m128_u64[1] = 0;
+        __m128 r = __udivti3(&p, &q);
+        overflow = (bool)r.m128_u64[1];
+        return r.m128_u64[0];
+    }
+
 #else
     inline u64 mult_div_128(u64 mult1, u64 mult2, u64 quot, bool& overflow) {
         typedef unsigned __int128 u128;
-        u128 result = (u128)mult1 * (u128)mult2 / quot;
+        u128 prod = (u128)mult1 * (u128)mult2;
+        u128 result = prod / quot;
         overflow = (bool)(u64)(result >> 64);
         return (u64)result;
     }
+
+    inline u64 mult_div_128_round_up(u64 mult1, u64 mult2, u64 quot, bool& overflow) {
+        typedef unsigned __int128 u128;
+        u128 prod = (u128)mult1 * (u128)mult2;
+        u128 result = (prod + quot - 1) / quot;
+        overflow = (bool)(u64)(result >> 64);
+        return (u64)result;
+    }
+
 #endif
 
     uint64_t core::helper_time(void* opaque, u64 clock) {
@@ -830,7 +857,7 @@ namespace ocx { namespace arm {
         }
 
         bool overflow;
-        u64 time_ps = mult_div_128(ticks, PS_PER_SEC, clock, overflow);
+        u64 time_ps = mult_div_128_round_up(ticks, PS_PER_SEC, clock, overflow);
         if (overflow)
             time_ps = UINT64_MAX;
         cpu->m_env.notify(idx, time_ps);
