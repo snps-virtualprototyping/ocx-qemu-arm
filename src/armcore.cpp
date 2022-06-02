@@ -140,7 +140,7 @@ namespace ocx { namespace arm {
         ARM_TIMER_NUM  = 4,
     };
 
-    class core : public ocx::core
+    class core : public ocx::core, public ocx::core_inv_range_extension
     {
     public:
         core() = delete;
@@ -193,6 +193,7 @@ namespace ocx { namespace arm {
 
         virtual void invalidate_page_ptrs() override;
         virtual void invalidate_page_ptr(u64 pgaddr) override;
+        virtual void invalidate_page_ptrs(u64 start, u64 end) override;
 
         virtual void tb_flush() override;
         virtual void tb_flush_page(u64 start, u64 end) override;
@@ -625,6 +626,11 @@ namespace ocx { namespace arm {
 
     void core::invalidate_page_ptrs() {
         uc_err ret = uc_dmi_invalidate(m_uc, 0ull, ~0ull);
+        ERROR_ON(ret != UC_ERR_OK, "failed to invalidate all dmi");
+    }
+
+    void core::invalidate_page_ptrs(u64 start, u64 end) {
+        uc_err ret = uc_dmi_invalidate(m_uc, start, end);
         ERROR_ON(ret != UC_ERR_OK, "failed to invalidate all dmi");
     }
 
