@@ -3,6 +3,8 @@ include(ExternalProject)
 
 project(ocx-qemu-arm)
 
+option(OCX_QEMU_ARM_BUILD_TESTS "Build unit tests" OFF)
+
 set(CMAKE_CXX_STANDARD 11)
 
 set(CAPSTONE_HOME $ENV{CAPSTONE_HOME})
@@ -83,7 +85,9 @@ target_link_libraries(ocx-qemu-arm ${UNICORN_LIB} capstone-static)
 
 install(TARGETS ocx-qemu-arm DESTINATION lib)
 
-enable_testing()
-add_test(NAME ocx-qemu-arm
-         COMMAND $<TARGET_FILE:ocx-test-runner>
-                 $<TARGET_FILE:ocx-qemu-arm> Cortex-A53)
+if(OCX_QEMU_ARM_BUILD_TESTS)
+    enable_testing()
+    add_test(NAME ocx-qemu-arm
+            COMMAND $<TARGET_FILE:ocx-test-runner>
+                    $<TARGET_FILE:ocx-qemu-arm> Cortex-A53)
+endif()
