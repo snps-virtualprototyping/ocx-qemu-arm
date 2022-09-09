@@ -16,7 +16,7 @@ env:
 
 before_script:
   - mkdir BUILD && cd BUILD
-  - CXX="g++ -m64" CC="gcc -m64" cmake .. -DCMAKE_BUILD_TYPE=$BUILD
+  - CXX="g++ -m64" CC="gcc -m64" cmake .. -DCMAKE_BUILD_TYPE=$BUILD -DOCX_QEMU_ARM_BUILD_TESTS=ON
 
 script:
   - make && ctest --output-on-failure
