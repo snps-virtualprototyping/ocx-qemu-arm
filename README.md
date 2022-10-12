@@ -40,7 +40,7 @@ framework for ARMv7 and ARMv8 disassembly.
 * Run [CMake](https://cmake.org) with `gcc` and `g++` in 64bit mode, 
   then `make` to build both the test harness and the unicorn core
 
-        CXX="g++ -m64" CC="gcc -m64" cmake ..
+        CXX="g++ -m64" CC="gcc -m64" cmake -DOCX_QEMU_ARM_BUILD_TESTS=ON ..
         make
 
 * The module should pass the regression tests are specified by the ocx test
