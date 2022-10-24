@@ -3,7 +3,7 @@ include(ExternalProject)
 
 project(ocx-qemu-arm)
 
-option(OCX_QEMU_ARM_BUILD_TESTS "Build unit tests" OFF)
+option(OCX_QEMU_ARM_BUILD_TESTS "Build unit tests" on)
 
 set(CMAKE_CXX_STANDARD 11)
 
@@ -22,7 +22,10 @@ if(NOT EXISTS ${UNICORN_HOME})
     set(UNICORN_HOME ${CMAKE_CURRENT_SOURCE_DIR}/unicorn)
 endif()
 
-string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE_UPPER)
+if(CMAKE_BUILD_TYPE)
+    string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE_UPPER)
+endif()
+
 if(BUILD_TYPE_UPPER STREQUAL "DEBUG")
     set(UNICORN_DEBUG yes)
 else()
