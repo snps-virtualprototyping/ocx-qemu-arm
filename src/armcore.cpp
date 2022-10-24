@@ -140,7 +140,10 @@ namespace ocx { namespace arm {
         ARM_TIMER_NUM  = 4,
     };
 
-    class core : public ocx::core, public ocx::core_inv_range_extension
+    class core :
+        public ocx::core,
+        public ocx::core_inv_range_extension,
+        public ocx::core_trace_insns_extension
     {
     public:
         core() = delete;
@@ -198,6 +201,8 @@ namespace ocx { namespace arm {
         virtual void tb_flush() override;
         virtual void tb_flush_page(u64 start, u64 end) override;
 
+        virtual bool trace_insns(bool on) override;
+
     private:
         uc_engine*   m_uc;
         env&         m_env;
@@ -209,6 +214,9 @@ namespace ocx { namespace arm {
         u64          m_start_time_ms;
         u64          m_procid;
         u64          m_coreid;
+
+        env_trace_insns_extension* m_trace_insns;
+        uc_hook      m_trace_insns_hook;
 
         bool is_aarch64() const;
         bool is_aarch32() const;
@@ -249,6 +257,8 @@ namespace ocx { namespace arm {
                                       bool iswr);
 
         static void helper_trace_bb(void* cpu, u64 pc);
+        static void helper_trace_insn(uc_engine* uc, u64 vaddr,
+                                      u64 size, void* cpu);
 
         static void helper_hint(void* opaque, uc_hint_t hint);
         static u64 helper_semihosting(void* opaque, u32 call);
@@ -272,7 +282,9 @@ namespace ocx { namespace arm {
         m_num_insn(0),
         m_start_time_ms(realtime_ms()),
         m_procid(0),
-        m_coreid(0) {
+        m_coreid(0),
+        m_trace_insns(dynamic_cast<ocx::env_trace_insns_extension*>(&m_env)),
+        m_trace_insns_hook(0) {
         uc_err ret = uc_open(m_model->name, this, &helper_config, &m_uc);
         ERROR_ON(ret != UC_ERR_OK, "unicorn error: %s", uc_strerror(ret));
 
@@ -472,19 +484,19 @@ namespace ocx { namespace arm {
     };
 
     size_t core::reg_size(u64 reg) {
-        ERROR_ON(reg >= num_regs(), 
+        ERROR_ON(reg >= num_regs(),
                  "register index %" PRIu64 " out of bounds", reg);
         return max(m_model->registers[reg].width / 8, 1);
     }
 
     const char* core::reg_name(u64 reg) {
-        ERROR_ON(reg >= num_regs(), 
+        ERROR_ON(reg >= num_regs(),
                  "register index %" PRIu64 " out of bounds", reg);
         return m_model->registers[reg].name;
     };
 
     bool core::read_reg(u64 idx, void* buf) {
-        ERROR_ON(idx >= num_regs(), 
+        ERROR_ON(idx >= num_regs(),
                  "register index %" PRIu64 " out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
@@ -507,7 +519,7 @@ namespace ocx { namespace arm {
     }
 
     bool core::write_reg(u64 idx, const void *buf) {
-        ERROR_ON(idx >= num_regs(), 
+        ERROR_ON(idx >= num_regs(),
                  "register index %" PRIu64 " out of bounds", idx);
 
         const reg& r = m_model->registers[idx];
@@ -559,6 +571,28 @@ namespace ocx { namespace arm {
     bool core::trace_basic_blocks(bool on) {
         uc_trace_basic_block_t func = on ? helper_trace_bb : NULL;
         return uc_setup_basic_block_trace(m_uc, this, func);
+    }
+
+    bool core::trace_insns(bool on) {
+        if (m_trace_insns == nullptr)
+            return false;
+
+        if (on) {
+            if (m_trace_insns_hook)
+                return true;
+
+            tb_flush();
+            uc_err ret = uc_hook_add(m_uc, &m_trace_insns_hook, UC_HOOK_CODE,
+                                     (void*)helper_trace_insn, this, 0, ~0);
+            return ret == UC_ERR_OK;
+        } else {
+            if (!m_trace_insns_hook)
+                return true;
+
+            tb_flush();
+            uc_err ret = uc_hook_del(m_uc, m_trace_insns_hook);
+            return ret == UC_ERR_OK;
+        }
     }
 
     bool core::virt_to_phys(u64 vaddr, u64& paddr) {
@@ -977,6 +1011,13 @@ namespace ocx { namespace arm {
         cpu->m_env.handle_begin_basic_block(pc);
     }
 
+    void core::helper_trace_insn(uc_engine* uc, u64 vaddr,
+                                 u64 size, void* opaque) {
+        (void)uc;
+        core* cpu = (core*)opaque;
+        cpu->m_trace_insns->handle_trace_insn(vaddr, size);
+    }
+
     void core::helper_hint(void* opaque, uc_hint_t hint) {
         core* cpu = (core*)opaque;
         env &e = cpu->m_env;
@@ -1026,7 +1067,7 @@ namespace ocx { namespace arm {
     //
     // ARM semihosting implementation
     //
-    
+
     string core::semihosting_read_string(u64 addr, size_t n) {
         string result;
         char buffer = ~0;
