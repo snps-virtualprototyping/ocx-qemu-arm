@@ -1360,5 +1360,12 @@ namespace ocx { namespace arm {
         delete cpu;
     }
 
+#ifdef _MSC_VER
+    // explicitly call static initialization code from libunicorn.a
+    // see also https://stackoverflow.com/questions/74642321
+    extern "C" void __explicit_ctor_init_get_clock();
+    static int __init_get_clock = (__explicit_ctor_init_get_clock(), 0);
+#endif
+
 }
 
