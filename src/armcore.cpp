@@ -48,6 +48,8 @@
 #  define STDOUT_FILENO 1
 #  define STDERR_FILENO 2
 #  pragma warning(disable: 4505 4800 4996)
+#else
+#  define O_BINARY 0
 #endif
 
 #define INFO(...)                                                             \
@@ -1101,14 +1103,19 @@ namespace ocx { namespace arm {
     }
 
     static int semihosting_modeflags(int mode) {
-        // bit 0 of mode stores "b" info, which is not needed for open
-        switch (mode >> 1) {
-        case 0: return O_RDONLY; // "r" and "rb"
-        case 1: return O_RDWR;   // "r+" and "r+b"
-        case 2: return O_WRONLY | O_CREAT | O_TRUNC;  // "w" and "wb"
-        case 3: return O_RDWR   | O_CREAT | O_TRUNC;  // "w+" and "w+b"
-        case 4: return O_WRONLY | O_CREAT | O_APPEND; // "a" and "ab"
-        case 5: return O_RDWR   | O_CREAT | O_APPEND; // "a+" and "a+b"
+        switch (mode) {
+        case  0: return O_RDONLY;                                   // "r"
+        case  1: return O_RDONLY | O_BINARY;                        // "rb"
+        case  2: return O_RDWR;                                     // "r+"
+        case  3: return O_RDWR   | O_BINARY;                        // "r+b"
+        case  4: return O_WRONLY | O_CREAT | O_TRUNC;               // "w"
+        case  5: return O_WRONLY | O_CREAT | O_TRUNC  | O_BINARY;   // "wb"
+        case  6: return O_RDWR   | O_CREAT | O_TRUNC;               // "w+"
+        case  7: return O_RDWR   | O_CREAT | O_TRUNC  | O_BINARY;   // "w+b"
+        case  8: return O_WRONLY | O_CREAT | O_APPEND;              // "a"
+        case  9: return O_WRONLY | O_CREAT | O_APPEND | O_BINARY;   // "ab"
+        case 10: return O_RDWR   | O_CREAT | O_APPEND;              // "a+"
+        case 11: return O_RDWR   | O_CREAT | O_APPEND | O_BINARY;   // "a+b"
         default:
             ERROR("illegal open mode %d", mode);
         }
