@@ -148,6 +148,14 @@ namespace ocx { namespace arm {
         { UC_ARM64_REG_VPIDR,   0, 64, "VPIDR_EL2"  },
         { UC_ARM64_REG_VMPIDR,  0, 64, "VMPIDR_EL1" },
 
+        /* aarch64 cpacr register */
+
+        { UC_ARM64_REG_CPACR_EL1, 0, 64,    "CPACR_EL1"     },
+
+        /* aarch64 cptr registers */
+        { UC_ARM64_REG_CPTR_EL2, 0, 64,     "CPTR_EL2" },
+        { UC_ARM64_REG_CPTR_EL3, 0, 64,     "CPTR_EL3" },
+
         /* aarch64 floating point registers */
         { UC_ARM64_REG_Q0,   0, 128, "Q0"  },
         { UC_ARM64_REG_Q1,   0, 128, "Q1"  },
@@ -490,6 +498,7 @@ namespace ocx { namespace arm {
         { UC_ARM_REG_NOIMP,         0, 32, "DBGDTRRX"      },
         { UC_ARM_REG_NOIMP,         0, 32, "DBGDTRTX"      },
         { UC_ARM_REG_MPIDR,         0, 32, "MPIDR"         },
+        { UC_ARM_REG_CPACR,         0, 32, "CPACR"         },
         { UC_ARM_REG_VECTADDR,      0, 32, "VECTADDR"      },
 
         /* aarch32 floating point registers */
