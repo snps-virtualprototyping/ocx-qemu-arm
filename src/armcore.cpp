@@ -443,12 +443,14 @@ namespace ocx { namespace arm {
     }
 
     void core::reset() {
-        u64 rvbaraddr = ~0ull;
-
-        // pc has already been reset to what reset_pc specifies, copy that
+        // pc has already been set to what reset_pc specifies, copy that
         // address into RVBAR
-        uc_reg_read(m_uc, UC_ARM64_REG_PC, &rvbaraddr);
-        uc_reg_write(m_uc, UC_ARM64_REG_RVBAR, &rvbaraddr);
+        u64 rvbaraddr = get_program_counter();
+
+        if (is_aarch64())
+            uc_reg_write(m_uc, UC_ARM64_REG_RVBAR, &rvbaraddr);
+        else
+            uc_reg_write(m_uc, UC_ARM_REG_RVBAR, &rvbaraddr);
 
         // actually reset cpu, PC gets set to RVBAR, which is why we updated
         // that above; this also resets EL, PSTATE, etc.
