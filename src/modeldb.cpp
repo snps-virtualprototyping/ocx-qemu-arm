@@ -156,6 +156,10 @@ namespace ocx { namespace arm {
         { UC_ARM64_REG_CPTR_EL2, 0, 64,     "CPTR_EL2" },
         { UC_ARM64_REG_CPTR_EL3, 0, 64,     "CPTR_EL3" },
 
+        /* aarch64 CBAR registers */
+        { UC_ARM64_REG_CBAR,     0, 32,     "CBAR"     },
+        { UC_ARM64_REG_CBAR_EL1, 0, 64,     "CBAR_EL1" },
+
         /* aarch64 floating point registers */
         { UC_ARM64_REG_Q0,   0, 128, "Q0"  },
         { UC_ARM64_REG_Q1,   0, 128, "Q1"  },
