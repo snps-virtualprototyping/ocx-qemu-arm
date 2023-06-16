@@ -102,12 +102,6 @@ The following core variants are supported, check also the [modeldb file](src/mod
 
 | Core Variant|Architecture|
 |-------------|------------|
-| Cortex-M0   | ARMv7-M    |
-| Cortex-M3   | ARMv7-M    |
-| Cortex-M4   | ARMv7-M    |
-| Cortex-M33  | ARMv7-M    |
-| Cortex-R5   | ARMv7-R    |
-| Cortex-R5F  | ARMv7-R    |
 | Cortex-A7   | ARMv7-A    |
 | Cortex-A8   | ARMv7-A    |
 | Cortex-A9   | ARMv7-A    |
@@ -116,6 +110,8 @@ The following core variants are supported, check also the [modeldb file](src/mod
 | Cortex-A57  | ARMv8-A    |
 | Cortex-A72  | ARMv8-A    |
 | Cortex-Max  | ARMv8-A    |
+
+Some Cortex-M and Cortex-R cores can be instatiated and have support for their instruction set and register visibility, but these have not been validated and require additional peripheral IP to be fully functional.
 
 ## Configuration Information
 
