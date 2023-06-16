@@ -111,7 +111,7 @@ The following core variants are supported, check also the [modeldb file](src/mod
 | Cortex-A72  | ARMv8-A    |
 | Cortex-Max  | ARMv8-A    |
 
-Some Cortex-M and Cortex-R cores can be instatiated and have support for their instruction set and register visibility, but these have not been validated and require additional peripheral IP to be fully functional.
+Some Cortex-M and Cortex-R cores can be instantiated and have support for their instruction set and register visibility, but these have not been validated and require additional peripheral IP to be fully functional.
 
 ## Configuration Information
 
