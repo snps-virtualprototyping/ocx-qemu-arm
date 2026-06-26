@@ -5,7 +5,7 @@
 #ifndef MODELDB_H
 #define MODELDB_H
 
-namespace ocx { namespace arm {
+namespace ocx20250721::ocx { namespace arm {
 
     struct reg {
         const int    id;

@@ -73,7 +73,7 @@
         }                                                                     \
     } while (0)
 
-namespace ocx { namespace arm {
+namespace ocx20250721::ocx { namespace arm {
 
     using std::max;
     using std::string;
@@ -142,15 +142,19 @@ namespace ocx { namespace arm {
         ARM_TIMER_NUM  = 4,
     };
 
-    class core :
-        public ocx::core,
-        public ocx::core_inv_range_extension,
-        public ocx::core_trace_insns_extension
+    class iss_core :
+        public core,
+        public core_inv_range_extension,
+        public core_trace_insns_extension,
+        public core_trace_coverage_extension,
+        public core_mode_change_trace_extension,
+        public core_global_monitor_extension,
+        public core_reg_breakpoint_extension
     {
     public:
-        core() = delete;
-        core(env &env, const model* modl);
-        virtual ~core();
+        iss_core() = delete;
+        iss_core(env &env, const model* modl);
+        virtual ~iss_core();
 
         // ocx core overrides
         const char* provider() override;
@@ -190,7 +194,25 @@ namespace ocx { namespace arm {
 
         virtual bool trace_basic_blocks(bool on) override;
 
+        virtual bool trace_coverage_blocks(bool on) override;
+
+        virtual bool trace_mode_changes(bool on) override;
+
+        virtual u64* register_global_monitor(u64** mon_ptr) override;
+
         virtual bool virt_to_phys(u64 paddr, u64& vaddr) override;
+
+        virtual bool add_reg_breakpoint(u64 regid, bool iswr) override;
+
+        virtual bool remove_reg_breakpoint(u64 regid, bool iswr) override;
+
+        virtual u64 num_ports() override;
+
+        virtual port_direction port_dir(u64 portid) override;
+
+        virtual const char* port_name(u64 portid) override;
+
+        virtual response transport(const transaction& tx) override;
 
         virtual void handle_syscall(int callno, shared_ptr<void> arg) override;
 
@@ -273,8 +295,13 @@ namespace ocx { namespace arm {
         };
     };
 
-    core::core(env &env, const model* modl) :
-        ocx::core(),
+    iss_core::iss_core(env &env, const model* modl) :
+        core(),
+        core_inv_range_extension(),
+        core_trace_insns_extension(),
+        core_trace_coverage_extension(),
+        core_global_monitor_extension(),
+        core_reg_breakpoint_extension(),
         m_uc(),
         m_env(env),
         m_model(modl),
@@ -285,7 +312,7 @@ namespace ocx { namespace arm {
         m_start_time_ms(realtime_ms()),
         m_procid(0),
         m_coreid(0),
-        m_trace_insns(dynamic_cast<ocx::env_trace_insns_extension*>(&m_env)),
+        m_trace_insns(dynamic_cast<env_trace_insns_extension*>(&m_env)),
         m_trace_insns_hook(0) {
         uc_err ret = uc_open(m_model->name, this, &helper_config, &m_uc);
         ERROR_ON(ret != UC_ERR_OK, "unicorn error: %s", uc_strerror(ret));
@@ -345,7 +372,7 @@ namespace ocx { namespace arm {
         }
     }
 
-    core::~core() {
+    iss_core::~iss_core() {
         if (m_uc) {
             uc_close(m_uc);
             m_uc = nullptr;
@@ -361,30 +388,30 @@ namespace ocx { namespace arm {
             cs_close(&m_cap_thumb);
     }
 
-    const char* core::provider() {
+    const char* iss_core::provider() {
         static char buf[256] = {};
         if (strlen(buf) == 0)
             snprintf(buf, sizeof(buf), "qemu/unicorn/yuzu - %s", uc_gitrev());
         return buf;
     }
 
-    const char* core::arch() {
+    const char* iss_core::arch() {
         return m_model->name;
     }
 
-    const char* core::arch_gdb() {
+    const char* iss_core::arch_gdb() {
         return m_model->has_aarch64() ? "aarch64" : "arm";
     }
 
-    const char* core::arch_family() {
+    const char* iss_core::arch_family() {
         return m_model->arch;
     }
 
-    u64 core::page_size() {
+    u64 iss_core::page_size() {
         return PAGE_SIZE;
     }
 
-    void core::set_id(u64 procid, u64 coreid) {
+    void iss_core::set_id(u64 procid, u64 coreid) {
         uc_err ret;
 
         if (m_model->has_aarch32()) {
@@ -405,7 +432,7 @@ namespace ocx { namespace arm {
         m_coreid = coreid;
     }
 
-    u64 core::step(u64 num_insn) {
+    u64 iss_core::step(u64 num_insn) {
         u64 pc = get_program_counter();
 
         if (is_thumb())
@@ -434,15 +461,15 @@ namespace ocx { namespace arm {
         return executed;
     }
 
-    void core::stop() {
+    void iss_core::stop() {
         uc_emu_stop(m_uc);
     }
 
-    u64 core::insn_count() {
+    u64 iss_core::insn_count() {
         return uc_instruction_count(m_uc);
     }
 
-    void core::reset() {
+    void iss_core::reset() {
         // pc has already been set to what reset_pc specifies, copy that
         // address into RVBAR
         u64 rvbaraddr = get_program_counter();
@@ -460,14 +487,14 @@ namespace ocx { namespace arm {
         set_id(m_procid, m_coreid);
     }
 
-    void core::interrupt(u64 irq, bool set) {
+    void iss_core::interrupt(u64 irq, bool set) {
         if (irq >= sizeof(IRQMAP) / sizeof(IRQMAP[0]))
             return;
         uc_err ret = uc_interrupt(m_uc, IRQMAP[irq], set);
         ERROR_ON(ret != UC_ERR_OK, "error dispatching irq %" PRIu64, irq);
     }
 
-    void core::notified(u64 eventid) {
+    void iss_core::notified(u64 eventid) {
         static_assert(ARM_TIMER_PHYS == 0, "unexpected ARM_TIMER_PHYS value");
         if (eventid > ARM_TIMER_SEC)
             ERROR("invalid timer index %" PRIu64, eventid);
@@ -475,31 +502,31 @@ namespace ocx { namespace arm {
         ERROR_ON(ret != UC_ERR_OK, "timer update: %s", uc_strerror(ret));
     }
 
-    u64 core::pc_regid() {
+    u64 iss_core::pc_regid() {
         return m_model->has_aarch64() ? 32 : 15;
     }
 
-    u64 core::sp_regid() {
+    u64 iss_core::sp_regid() {
         return m_model->has_aarch64() ? 31 : 13;
     }
 
-    u64 core::num_regs() {
+    u64 iss_core::num_regs() {
         return m_model->nregs;
     };
 
-    size_t core::reg_size(u64 reg) {
+    size_t iss_core::reg_size(u64 reg) {
         ERROR_ON(reg >= num_regs(),
                  "register index %" PRIu64 " out of bounds", reg);
         return max(m_model->registers[reg].width / 8, 1);
     }
 
-    const char* core::reg_name(u64 reg) {
+    const char* iss_core::reg_name(u64 reg) {
         ERROR_ON(reg >= num_regs(),
                  "register index %" PRIu64 " out of bounds", reg);
         return m_model->registers[reg].name;
     };
 
-    bool core::read_reg(u64 idx, void* buf) {
+    bool iss_core::read_reg(u64 idx, void* buf) {
         ERROR_ON(idx >= num_regs(),
                  "register index %" PRIu64 " out of bounds", idx);
 
@@ -522,7 +549,7 @@ namespace ocx { namespace arm {
         return true;
     }
 
-    bool core::write_reg(u64 idx, const void *buf) {
+    bool iss_core::write_reg(u64 idx, const void *buf) {
         ERROR_ON(idx >= num_regs(),
                  "register index %" PRIu64 " out of bounds", idx);
 
@@ -550,34 +577,34 @@ namespace ocx { namespace arm {
         return true;
     }
 
-    bool core::add_breakpoint(u64 addr) {
+    bool iss_core::add_breakpoint(u64 addr) {
         uc_err ret = uc_cbbreakpoint_insert(m_uc, addr);
         return ret == UC_ERR_OK;
     }
 
-    bool core::remove_breakpoint(u64 addr) {
+    bool iss_core::remove_breakpoint(u64 addr) {
         uc_err ret = uc_cbbreakpoint_remove(m_uc, addr);
         return ret == UC_ERR_OK;
     }
 
-    bool core::add_watchpoint(u64 addr, u64 size, bool iswr) {
+    bool iss_core::add_watchpoint(u64 addr, u64 size, bool iswr) {
         int rw = iswr ? UC_WP_WRITE : UC_WP_READ;
         uc_err ret = uc_cbwatchpoint_insert(m_uc, addr, size, rw);
         return ret == UC_ERR_OK;
     }
 
-    bool core::remove_watchpoint(u64 addr, u64 size, bool iswr) {
+    bool iss_core::remove_watchpoint(u64 addr, u64 size, bool iswr) {
         int rw = iswr ? UC_WP_WRITE : UC_WP_READ;
         uc_err ret = uc_cbwatchpoint_remove(m_uc, addr, size, rw);
         return ret == UC_ERR_OK;
     }
 
-    bool core::trace_basic_blocks(bool on) {
+    bool iss_core::trace_basic_blocks(bool on) {
         uc_trace_basic_block_t func = on ? helper_trace_bb : NULL;
         return uc_setup_basic_block_trace(m_uc, this, func);
     }
 
-    bool core::trace_insns(bool on) {
+    bool iss_core::trace_insns(bool on) {
         if (m_trace_insns == nullptr)
             return false;
 
@@ -599,12 +626,70 @@ namespace ocx { namespace arm {
         }
     }
 
-    bool core::virt_to_phys(u64 vaddr, u64& paddr) {
+    bool iss_core::trace_coverage_blocks(bool on) {
+        (void)on;
+        return true;
+    }
+
+    bool iss_core::trace_mode_changes(bool on) {
+        (void)on;
+        return true;
+    }
+
+    u64* iss_core::register_global_monitor(u64** mon_ptr) {
+        (void)mon_ptr;
+        return NULL;
+    }
+
+    bool iss_core::virt_to_phys(u64 vaddr, u64& paddr) {
         uc_err ret = uc_va2pa(m_uc, vaddr, (uint64_t *)&paddr);
         return ret == UC_ERR_OK;
     }
 
-    void core::handle_syscall(int callno, shared_ptr<void> arg) {
+    bool iss_core::add_reg_breakpoint(u64 regid, bool iswr) {
+        (void)regid;
+        (void)iswr;
+        return true;
+    }
+
+    bool iss_core::remove_reg_breakpoint(u64 regid, bool iswr) {
+        (void)regid;
+        (void)iswr;
+        return true;
+    }
+
+    u64 iss_core::num_ports() {
+        return 2;
+    }
+
+    port_direction iss_core::port_dir(u64 portid) {
+        switch (portid) {
+        case 0:
+            return PORT_OUT;
+        case 1:
+            return PORT_OUT;
+        default:
+            return PORT_UNKNOWN;
+        }
+    }
+
+    const char* iss_core::port_name(u64 portid) {
+        switch (portid) {
+        case 0:
+            return "MEM";
+        case 1:
+            return "IO";
+        default:
+            return nullptr;
+        }
+    }
+
+    response iss_core::transport(const transaction& tx) {
+        (void)tx;
+        return RESP_OK;
+    }
+
+    void iss_core::handle_syscall(int callno, shared_ptr<void> arg) {
         uc_err ret;
         switch (callno) {
         case TLB_FLUSH:
@@ -634,7 +719,7 @@ namespace ocx { namespace arm {
         }
     }
 
-    u64 core::disassemble(u64 addr, char* buf, size_t bufsz) {
+    u64 iss_core::disassemble(u64 addr, char* buf, size_t bufsz) {
         ERROR_ON(bufsz == 0, "unexpected zero bufsz");
 
         u32 insn = 0;
@@ -662,32 +747,32 @@ namespace ocx { namespace arm {
         return ((addr + size) & ~(size - 1)) - addr;
     }
 
-    void core::invalidate_page_ptrs() {
+    void iss_core::invalidate_page_ptrs() {
         uc_err ret = uc_dmi_invalidate(m_uc, 0ull, ~0ull);
         ERROR_ON(ret != UC_ERR_OK, "failed to invalidate all dmi");
     }
 
-    void core::invalidate_page_ptrs(u64 start, u64 end) {
+    void iss_core::invalidate_page_ptrs(u64 start, u64 end) {
         uc_err ret = uc_dmi_invalidate(m_uc, start, end);
         ERROR_ON(ret != UC_ERR_OK, "failed to invalidate all dmi");
     }
 
-    void core::invalidate_page_ptr(u64 pgaddr) {
+    void iss_core::invalidate_page_ptr(u64 pgaddr) {
         uc_err ret = uc_dmi_invalidate(m_uc, pgaddr, pgaddr + PAGE_SIZE - 1);
         ERROR_ON(ret != UC_ERR_OK, "failed to invalidate dmi ptr");
     }
 
-    void core::tb_flush() {
+    void iss_core::tb_flush() {
         uc_err ret = uc_tb_flush(m_uc);
         ERROR_ON(ret != UC_ERR_OK, "failed to flush TBs");
     }
 
-    void core::tb_flush_page(u64 start, u64 end) {
+    void iss_core::tb_flush_page(u64 start, u64 end) {
         uc_err ret = uc_tb_flush_page(m_uc, start, end);
         ERROR_ON(ret != UC_ERR_OK, "failed to flush TB page rage");
     }
 
-    bool core::is_aarch64() const {
+    bool iss_core::is_aarch64() const {
         if (!m_model->has_aarch64())
             return false;
 
@@ -697,11 +782,11 @@ namespace ocx { namespace arm {
         return state;
     }
 
-    bool core::is_aarch32() const {
+    bool iss_core::is_aarch32() const {
         return !is_aarch64() && !is_thumb();
     }
 
-    bool core::is_thumb() const {
+    bool iss_core::is_thumb() const {
         if (is_aarch64())
             return false;
 
@@ -711,7 +796,7 @@ namespace ocx { namespace arm {
         return state;
     }
 
-    csh core::lookup_disassembler() const {
+    csh iss_core::lookup_disassembler() const {
         if (is_thumb())
             return m_cap_thumb;
         if (is_aarch32())
@@ -721,7 +806,7 @@ namespace ocx { namespace arm {
         return 0;
     }
 
-    u64 core::get_program_counter() const {
+    u64 iss_core::get_program_counter() const {
         const bool aarch64 = is_aarch64();
         u64 val = aarch64 ? ~0ull : ~0u;
         int reg = aarch64 ? (int)UC_ARM64_REG_PC : (int)UC_ARM_REG_PC;
@@ -730,7 +815,7 @@ namespace ocx { namespace arm {
         return val;
     }
 
-    size_t core::access_mem_phys(u64 addr, u8 *buf, size_t bufsz, bool iswr) {
+    size_t iss_core::access_mem_phys(u64 addr, u8 *buf, size_t bufsz, bool iswr) {
         transaction tx;
         tx.addr = addr;
         tx.size = bufsz;
@@ -742,7 +827,7 @@ namespace ocx { namespace arm {
         tx.is_insn = false;
         tx.is_excl = false;
         tx.is_lock = false;
-        tx.is_port = false;
+        tx.port = 0;
 
         if (m_env.transport(tx) != RESP_OK)
             return 0;
@@ -750,7 +835,7 @@ namespace ocx { namespace arm {
         return tx.size;
     }
 
-    size_t core::read_mem_virt(u64 addr, void *buf, size_t bufsz) {
+    size_t iss_core::read_mem_virt(u64 addr, void *buf, size_t bufsz) {
         uc_err ret;
         u64 phys = 0;
         const size_t pgsz = page_size();
@@ -785,7 +870,7 @@ namespace ocx { namespace arm {
         return bytes_read;
     }
 
-    size_t core::write_mem_virt(u64 addr, const void* buf, size_t bufsz) {
+    size_t iss_core::write_mem_virt(u64 addr, const void* buf, size_t bufsz) {
         uc_err ret;
         u64 phys = 0;
         const size_t pgsz = page_size();
@@ -870,8 +955,8 @@ namespace ocx { namespace arm {
 
 #endif
 
-    uint64_t core::helper_time(void* opaque, u64 clock) {
-        core* cpu = (core*)opaque;
+    uint64_t iss_core::helper_time(void* opaque, u64 clock) {
+        iss_core* cpu = (iss_core*)opaque;
         bool overflow;
         u64 time_ps = cpu->m_env.get_time_ps();
         u64 ticks = mult_div_128(time_ps, clock, PS_PER_SEC, overflow);
@@ -879,16 +964,16 @@ namespace ocx { namespace arm {
         return ticks;
     }
 
-    void core::helper_time_irq(void* opaque, int idx, int set) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_time_irq(void* opaque, int idx, int set) {
+        iss_core* cpu = (iss_core*)opaque;
         cpu->m_env.signal(idx, set);
     }
 
-    void core::helper_schedule(void* opaque, int idx, u64 clock, u64 ticks) {
+    void iss_core::helper_schedule(void* opaque, int idx, u64 clock, u64 ticks) {
         if (idx < ARM_TIMER_PHYS || idx > ARM_TIMER_SEC)
             ERROR("invalid timer index %d", idx);
 
-        core* cpu = (core*)opaque;
+        iss_core* cpu = (iss_core*)opaque;
 
         if (ticks == UINT64_MAX) {
             cpu->m_env.cancel(idx);
@@ -907,22 +992,24 @@ namespace ocx { namespace arm {
         cpu->m_env.notify(idx, time_ps);
     }
 
-    uc_tx_result_t core::helper_transport(uc_engine* uc, void* opaque,
+    uc_tx_result_t iss_core::helper_transport(uc_engine* uc, void* opaque,
                                           uc_mmio_tx_t* tx) {
         (void)uc;
-        core* cpu = (core*)opaque;
+        iss_core* cpu = (iss_core*)opaque;
 
         transaction xt = {
             /*.addr = */        tx->addr,
             /*.size = */        tx->size,
             /*.data = */        (u8*)tx->data,
+            /*.space = */       0,
+            /*.cpuid = */       0,
+            /*.port = */        tx->is_io,
             /*.is_read = */     tx->is_read,
             /*.is_user = */     tx->is_user,
             /*.is_secure = */   tx->is_secure,
             /*.is_insn = */     false,
             /*.is_excl = */     uc_is_excl(cpu->m_uc),
             /*.is_lock = */     false,
-            /*.is_port = */     tx->is_io,
             /*.is_debug = */    uc_is_debug(cpu->m_uc)
         };
 
@@ -932,9 +1019,9 @@ namespace ocx { namespace arm {
         return translate_response(resp);
     }
 
-    bool core::helper_dmi(void* opaque, u64 page, unsigned char** dmiptr,
+    bool iss_core::helper_dmi(void* opaque, u64 page, unsigned char** dmiptr,
                           int* prot) {
-        core* cpu = (core*)opaque;
+        iss_core* cpu = (iss_core*)opaque;
 
         u8* r = nullptr;
         u8* w = nullptr;
@@ -965,65 +1052,65 @@ namespace ocx { namespace arm {
         return true;
     }
 
-    void core::helper_pgprot(void* opaque, unsigned char* ptr, uint64_t addr) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_pgprot(void* opaque, unsigned char* ptr, uint64_t addr) {
+        iss_core* cpu = (iss_core*)opaque;
         cpu->m_env.protect_page(ptr, addr);
     }
 
-    void core::helper_tlb_cluster_flush(void* opaque) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_tlb_cluster_flush(void* opaque) {
+        iss_core* cpu = (iss_core*)opaque;
         shared_ptr<void> arg(nullptr);
         cpu->m_env.broadcast_syscall(TLB_FLUSH, move(arg), true);
     }
 
-    void core::helper_tlb_cluster_flush_page(void* opaque, u64 addr) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_tlb_cluster_flush_page(void* opaque, u64 addr) {
+        iss_core* cpu = (iss_core*)opaque;
         shared_ptr<void> arg(new u64(addr));
         cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE, move(arg), true);
     }
 
-    void core::helper_tlb_cluster_flush_mmuidx(void* opaque, uint16_t idxmap) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_tlb_cluster_flush_mmuidx(void* opaque, uint16_t idxmap) {
+        iss_core* cpu = (iss_core*)opaque;
         shared_ptr<void> arg(new uint16_t(idxmap));
         cpu->m_env.broadcast_syscall(TLB_FLUSH_MMUIDX, move(arg), true);
     }
 
-    void core::helper_tlb_cluster_flush_page_mmuidx(void* opaque, u64 addr,
+    void iss_core::helper_tlb_cluster_flush_page_mmuidx(void* opaque, u64 addr,
                                                     uint16_t idxmap) {
-        core* cpu = (core*)opaque;
+        iss_core* cpu = (iss_core*)opaque;
         shared_ptr<void> arg(new flush_page_mmuidx_args { addr, idxmap });
         cpu->m_env.broadcast_syscall(TLB_FLUSH_PAGE_MMUIDX, move(arg), true);
     }
 
-    void core::helper_breakpoint(void* opaque, u64 addr) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_breakpoint(void* opaque, u64 addr) {
+        iss_core* cpu = (iss_core*)opaque;
         if (cpu->m_env.handle_breakpoint(addr)) {
             uc_emu_stop(cpu->m_uc);
         }
     }
 
-    void core::helper_watchpoint(void* opaque, u64 addr, u64 size, u64 data,
+    void iss_core::helper_watchpoint(void* opaque, u64 addr, u64 size, u64 data,
                                  bool iswr) {
-        core* cpu = (core*)opaque;
+        iss_core* cpu = (iss_core*)opaque;
         if (cpu->m_env.handle_watchpoint(addr, size, data, iswr)) {
             uc_emu_stop(cpu->m_uc);
         }
     }
 
-    void core::helper_trace_bb(void* opaque, u64 pc) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_trace_bb(void* opaque, u64 pc) {
+        iss_core* cpu = (iss_core*)opaque;
         cpu->m_env.handle_begin_basic_block(pc);
     }
 
-    void core::helper_trace_insn(uc_engine* uc, u64 vaddr,
+    void iss_core::helper_trace_insn(uc_engine* uc, u64 vaddr,
                                  u64 size, void* opaque) {
         (void)uc;
-        core* cpu = (core*)opaque;
+        iss_core* cpu = (iss_core*)opaque;
         cpu->m_trace_insns->handle_trace_insn(vaddr, size);
     }
 
-    void core::helper_hint(void* opaque, uc_hint_t hint) {
-        core* cpu = (core*)opaque;
+    void iss_core::helper_hint(void* opaque, uc_hint_t hint) {
+        iss_core* cpu = (iss_core*)opaque;
         env &e = cpu->m_env;
 
         switch (hint) {
@@ -1058,13 +1145,13 @@ namespace ocx { namespace arm {
         }
     }
 
-    u64 core::helper_semihosting(void* opaque, u32 call) {
-        core* cpu = (core*)opaque;
+    u64 iss_core::helper_semihosting(void* opaque, u32 call) {
+        iss_core* cpu = (iss_core*)opaque;
         return cpu->semihosting(call);
     }
 
-    const char* core::helper_config(void* opaque, const char* config) {
-        core* cpu = (core*)opaque;
+    const char* iss_core::helper_config(void* opaque, const char* config) {
+        iss_core* cpu = (iss_core*)opaque;
         return cpu->m_env.get_param(config);
     }
 
@@ -1072,7 +1159,7 @@ namespace ocx { namespace arm {
     // ARM semihosting implementation
     //
 
-    string core::semihosting_read_string(u64 addr, size_t n) {
+    string iss_core::semihosting_read_string(u64 addr, size_t n) {
         string result;
         char buffer = ~0;
         while (n-- && buffer != '\0') {
@@ -1084,7 +1171,7 @@ namespace ocx { namespace arm {
         return result;
     }
 
-    u64 core::semihosting_read_reg(unsigned int no) {
+    u64 iss_core::semihosting_read_reg(unsigned int no) {
         ERROR_ON(no > 1, "unexpected semihost reg read %u", no);
         u64 val = ~0ull;
         no = (is_aarch64() ? (int)UC_ARM64_REG_X0 : (int)UC_ARM_REG_R0) + no;
@@ -1093,7 +1180,7 @@ namespace ocx { namespace arm {
         return val;
     }
 
-    u64 core::semihosting_read_field(int n) {
+    u64 iss_core::semihosting_read_field(int n) {
         const u64 size = is_aarch64() ? sizeof(u64) : sizeof(u32);
         u64 addr = semihosting_read_reg(1) + n * size;
         u64 field = 0;
@@ -1123,7 +1210,7 @@ namespace ocx { namespace arm {
         }
     }
 
-    u64 core::semihosting(u32 call) {
+    u64 iss_core::semihosting(u32 call) {
         enum semihosting_call {
             SHC_OPEN    = 0x01,
             SHC_CLOSE   = 0x02,
@@ -1347,7 +1434,7 @@ namespace ocx { namespace arm {
 
     } // namespace arm
 
-    core* create_instance(u64 api_version, env& e, const char* variant) {
+    OCX_API core* create_instance(u64 api_version, env& e, const char* variant) {
         if (api_version != OCX_API_VERSION) {
             INFO("OCX_API_VERSION mismatch: requested %" PRIu64 " - "
                  "expected %llu", api_version, OCX_API_VERSION);
@@ -1360,11 +1447,11 @@ namespace ocx { namespace arm {
             return nullptr;
         }
 
-        return new arm::core(e, model);
+        return new ::arm::iss_core(e, model);
     }
 
-    void delete_instance(core* c) {
-        arm::core* cpu = dynamic_cast<arm::core*>(c);
+    OCX_API void delete_instance(core* c) {
+        arm::iss_core* cpu = dynamic_cast<arm::iss_core*>(c);
         ERROR_ON(cpu == nullptr, "calling delete_instance with foreign core");
         delete cpu;
     }

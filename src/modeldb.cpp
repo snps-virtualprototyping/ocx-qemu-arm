@@ -10,7 +10,7 @@
 #include <unicorn/arm.h>
 #include <unicorn/arm64.h>
 
-namespace ocx { namespace arm {
+namespace ocx20250721::ocx { namespace arm {
 
     static const reg g_regdb[] = {
         /* aarch64 core registers */

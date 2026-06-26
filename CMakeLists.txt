@@ -5,7 +5,7 @@ project(ocx-qemu-arm)
 
 option(OCX_QEMU_ARM_BUILD_TESTS "Build unit tests" on)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 set(CAPSTONE_HOME $ENV{CAPSTONE_HOME})
 if(NOT EXISTS ${CAPSTONE_HOME})
